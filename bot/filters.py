@@ -36,6 +36,7 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
     # ── Uzbek ──────────────────────────────────────────────────────
     "uzbek": [
         "ish bor",
+        "iw bor"
         "ish bor edi",
         "ishchi kerak",
         "ishchilar kerak",
@@ -91,6 +92,11 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
 "арбайт",
 "арбайт",
 "текпе",
+"F6",
+"F5",
+"F4",
+"F2",
+
     ],
 
     # ── Russian ────────────────────────────────────────────────────
