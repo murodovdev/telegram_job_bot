@@ -74,13 +74,14 @@ async def _on_new_message(event: events.NewMessage.Event) -> None:
     logger.info("[monitor] SOURCE GROUP HIT | chat_id=%s | msg_id=%s", chat_id, msg_id)
 
     # ── 2. Skip non-text messages ────────────────────────────────
-    text = message.text or message.raw_text or ""
+    text = message.text or message.caption or message.raw_text or ""
     if not text.strip():
         return
 
     # ── 3. Repost / forward duplicate check ──────────────────────
     # If this message was forwarded from another chat, check the ORIGINAL
     # (chat_id, msg_id) — if we've already seen it from another group, skip.
+    _pending_original: Optional[tuple] = None
     fwd = getattr(message, "fwd_from", None)
     if fwd is not None:
         orig_chat = getattr(fwd, "from_id", None)
@@ -105,8 +106,8 @@ async def _on_new_message(event: events.NewMessage.Event) -> None:
                     orig_chat_id, orig_msg,
                 )
                 return
-            # Not seen before — record it so future reposts are caught
-            db.mark_original(orig_chat_id, orig_msg)
+            # Store for marking after we confirm it is a job post (see step 5)
+            _pending_original = (orig_chat_id, orig_msg)
 
     # ── 4. Processed-message dedup ───────────────────────────────
     if db.is_processed(chat_id, msg_id):
@@ -120,6 +121,10 @@ async def _on_new_message(event: events.NewMessage.Event) -> None:
             "[monitor] SKIPPED (no keywords) | tier info | preview=%r", text[:80]
         )
         return
+
+    # Confirmed job post — safe to register origin for repost dedup
+    if _pending_original:
+        db.mark_original(*_pending_original)
 
     logger.info(
         "[monitor] ✅ JOB DETECTED | chat=%s | msg=%s | lang=%s | tier=%s | kw=%s",
