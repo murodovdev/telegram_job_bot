@@ -60,7 +60,7 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
         "hamkor kerak",
         "yordamchi kerak",
         "vakansiya",
-        "arbayt",        # Korean part-time loanword used by Uzbeks
+        "arbayt",      
         "arbait",
         "tekpe",    
         "иш бор",
@@ -90,7 +90,7 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
 "вакансия",
 "арбайт",
 "арбайт",
-"текпе",# Korean 텍배 (delivery work), used by Uzbeks
+"текпе",
     ],
 
     # ── Russian ────────────────────────────────────────────────────
