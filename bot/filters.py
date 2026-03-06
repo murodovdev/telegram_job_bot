@@ -71,7 +71,9 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
         "ish haki",        # another variant
         "ish vaqti",
         "иш бор",
-        "joy bor"
+        "joy bor",
+        "iw bor"
+        
     ],
     "russian": [
         "работа есть",
