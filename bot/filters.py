@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 STRONG_KEYWORDS: dict[str, list[str]] = {
     # ── Uzbek ──────────────────────────────────────────────────────
     "uzbek": [
+        "ishi bor",
         "odam kere",
         "iw bor",
         "ish bor",
