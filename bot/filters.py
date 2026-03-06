@@ -36,8 +36,6 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
     # ── Uzbek ──────────────────────────────────────────────────────
     "uzbek": [
         "ish bor",
-        "ish bor.",
-        "ish bir",
         "ish bor edi",
         "ishchi kerak",
         "ishchilar kerak",
@@ -64,9 +62,12 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
         "vakansiya",
         "arbayt",        # Korean part-time loanword used by Uzbeks
         "arbait",
-        "tekpe",   
-        "иш бор",
-        "iw bor"# Korean 텍배 (delivery work), used by Uzbeks
+        "tekpe",         # Korean 텍배 (delivery work), used by Uzbeks
+        "ishxona",
+        "ish haqi",
+        "ish xaqi",      # common misspelling
+        "ish haki",      # another variant
+        "ish vaqti",
     ],
 
     # ── Russian ────────────────────────────────────────────────────
@@ -115,17 +116,32 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
 
 # ── Pre-compile patterns (once at import time) ────────────────────
 
+# Inside a multi-word keyword like "ish bor", the space is replaced
+# with this pattern so that "ishbor", "ish-bor", "ish_bor" all match.
+# After _normalise() the text already has hyphens/underscores converted
+# to spaces, but this handles the edge case where two words are written
+# with zero separator (e.g. "ishbor" written as one word).
+_FLEX_SEP = r"\s*"   # zero or more spaces between words
+
+
 def _build_patterns() -> dict[str, re.Pattern]:
     patterns: dict[str, re.Pattern] = {}
     for lang, words in STRONG_KEYWORDS.items():
         if lang == "korean":
-            # Korean has no word spaces — use plain substring match
+            # Korean has no word spaces — plain substring match is correct
             combined = "|".join(re.escape(w) for w in words)
         else:
-            # Latin / Cyrillic — word-boundary anchors for precision
-            combined = "|".join(
-                r"(?<!\w)" + re.escape(w) + r"(?!\w)" for w in words
-            )
+            # For each keyword, replace every space with _FLEX_SEP so that
+            # "ish bor" matches "ish bor", "ishbor", and "ish  bor" equally.
+            parts = []
+            for w in words:
+                # Split on spaces, escape each token, rejoin with flex sep
+                tokens  = [re.escape(t) for t in w.split()]
+                pattern = _FLEX_SEP.join(tokens)
+                # Wrap with word-boundary-like anchors:
+                # (?<!\w) / (?!\w) ensure we don't match inside a longer word
+                parts.append(r"(?<!\w)" + pattern + r"(?!\w)")
+            combined = "|".join(parts)
         patterns[lang] = re.compile(combined, re.IGNORECASE | re.UNICODE)
     return patterns
 
@@ -192,6 +208,35 @@ def list_keywords() -> dict[str, list[str]]:
 
 # ── Internal helpers ──────────────────────────────────────────────
 
+# Characters that can appear between or around words but are not
+# meaningful separators — we convert them to a space so that
+# "ish-bor", "ish_bor", "ish/bor" all become "ish bor".
+_SEPARATOR_RE = re.compile(r"[-_./|\\]")
+
+# Emoji and other non-alphanumeric, non-space Unicode symbols that
+# get glued to words — e.g. "arbayt💪" or "vakansiya!!!" or "(ish bor)".
+# We strip them so the word itself remains clean.
+# Keeps: letters (any script), digits, spaces, apostrophe (for o'rni).
+_NOISE_RE = re.compile(r"[^\w\s']", re.UNICODE)
+
+
 def _normalise(text: str) -> str:
-    """Lower-case and collapse whitespace."""
-    return re.sub(r"\s+", " ", text.lower()).strip()
+    """
+    Prepare text for keyword matching.
+
+    Pipeline
+    --------
+    1. Lower-case
+    2. Replace separator characters (-_./\\|) with spaces
+       → "ish-bor"  becomes "ish bor"
+       → "ish_bor"  becomes "ish bor"
+    3. Strip noise characters (emoji, punctuation, brackets …)
+       → "arbayt💪" becomes "arbayt"
+       → "(ish bor)" becomes "ish bor"
+    4. Collapse multiple spaces into one
+    """
+    text = text.lower()
+    text = _SEPARATOR_RE.sub(" ", text)   # step 2
+    text = _NOISE_RE.sub(" ", text)       # step 3
+    text = re.sub(r"\s+", " ", text)      # step 4
+    return text.strip()
