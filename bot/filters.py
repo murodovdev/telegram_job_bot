@@ -62,12 +62,35 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
         "vakansiya",
         "arbayt",        # Korean part-time loanword used by Uzbeks
         "arbait",
-        "tekpe",         # Korean 텍배 (delivery work), used by Uzbeks
-        "ishxona",
-        "ish haqi",
-        "ish xaqi",      # common misspelling
-        "ish haki",      # another variant
-        "ish vaqti",
+        "tekpe",    
+        "иш бор",
+"иш бор эди",
+"ишчи керак",
+"ишчилар керак",
+"одам керак",
+"одамлар керак",
+"киши керак",
+"кишига иш",
+"кишилар керак",
+"иш таклиф",
+"иш ўрни",
+"иш жойи",
+"иш ўринлари",
+"ишга таклиф",
+"ишга олинади",
+"ишга оламан",
+"ишга оламиз",
+"иш бераман",
+"иш берамиз",
+"иш берилади",
+"ходим керак",
+"ходимлар керак",
+"ҳамкор керак",
+"ёрдамчи керак",
+"вакансия",
+"арбайт",
+"арбайт",
+"текпе",# Korean 텍배 (delivery work), used by Uzbeks
     ],
 
     # ── Russian ────────────────────────────────────────────────────
