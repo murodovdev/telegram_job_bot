@@ -69,6 +69,7 @@ async def _on_new_message(event: events.NewMessage.Event) -> None:
 
     # ── 1. Source-group gate ──────────────────────────────────────
     if chat_id not in db.get_source_group_ids():
+        logger.debug("[monitor] IGNORED (not a source group) | chat_id=%s | msg_id=%s", chat_id, msg_id)
         return
 
     logger.info("[monitor] SOURCE GROUP HIT | chat_id=%s | msg_id=%s", chat_id, msg_id)
@@ -76,6 +77,7 @@ async def _on_new_message(event: events.NewMessage.Event) -> None:
     # ── 2. Skip non-text messages ────────────────────────────────
     text = message.text or message.caption or message.raw_text or ""
     if not text.strip():
+        logger.info("[monitor] SKIPPED (no text/caption) | chat_id=%s | msg_id=%s", chat_id, msg_id)
         return
 
     # ── 3. Repost / forward duplicate check ──────────────────────
@@ -111,14 +113,15 @@ async def _on_new_message(event: events.NewMessage.Event) -> None:
 
     # ── 4. Processed-message dedup ───────────────────────────────
     if db.is_processed(chat_id, msg_id):
-        logger.debug("[monitor] SKIPPED (already processed) | msg_id=%s", msg_id)
+        logger.info("[monitor] SKIPPED (already processed) | chat_id=%s | msg_id=%s", chat_id, msg_id)
         return
 
     # ── 5. Keyword filter ────────────────────────────────────────
     result = is_job_message(text)
     if not result.is_job:
-        logger.debug(
-            "[monitor] SKIPPED (no keywords) | tier info | preview=%r", text[:80]
+        logger.info(
+            "[monitor] SKIPPED (no keywords) | chat_id=%s | msg_id=%s | preview=%r",
+            chat_id, msg_id, text[:80],
         )
         return
 
@@ -174,9 +177,9 @@ async def _on_new_message(event: events.NewMessage.Event) -> None:
     )
 
     success = await safe_send_message(client, target, post_text)
-    db.mark_processed(chat_id, msg_id)
 
     if success:
+        db.mark_processed(chat_id, msg_id)
         logger.info(
             "[monitor] ✅ FORWARDED | chat=%s | msg=%s → target=%s",
             chat_id, msg_id, target,
