@@ -80,6 +80,7 @@ def _main_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="➖ Remove Group"), KeyboardButton(text="🎯 Set Target")],
             [KeyboardButton(text="📊 Status"),       KeyboardButton(text="🧪 Test Send")],
             [KeyboardButton(text="📈 Stats"),        KeyboardButton(text="🔍 Test Keyword")],
+            [KeyboardButton(text="🔎 Check Groups")],
         ],
         resize_keyboard=True,
     )
@@ -147,6 +148,30 @@ async def _check_membership(chat_id: int) -> tuple[bool, str]:
             "The group was added to the list, but <b>you must join it manually</b> "
             "with the monitor account, otherwise no messages will be received from it.",
         )
+
+
+async def _check_all_memberships(groups: list) -> tuple[list, list]:
+    """
+    Check every registered source group and return two lists:
+      active   — groups the monitor account IS a member of
+      inactive — groups the monitor account is NOT a member of
+
+    Each entry is a SourceGroup dataclass object.
+    Falls back to (all_groups, []) if Telethon is not connected.
+    """
+    if _telethon_client is None or not _telethon_client.is_connected():
+        return groups, []
+
+    from telethon.tl.functions.channels import GetParticipantRequest
+
+    active, inactive = [], []
+    for g in groups:
+        try:
+            await _telethon_client(GetParticipantRequest(g.chat_id, "me"))
+            active.append(g)
+        except Exception:
+            inactive.append(g)
+    return active, inactive
 
 
 # ── Router ────────────────────────────────────────────────────────
@@ -562,13 +587,99 @@ async def cmd_status(message: Message, state: FSMContext):
 
     await message.answer(
         f"📊 <b>Bot Status</b>\n\n"
-        f"<b>🤖 Monitor:</b> {monitor_status}\n"
-        f"<b>👁 Source groups:</b> {len(groups)}\n"
-        f"<b>🎯 Target group:</b> {target_str}\n"
-        f"<b>📨 Total forwarded:</b>{processed}",
+        f"🤖 Monitor: {monitor_status}\n"
+        f"👁 Source groups: <b>{len(groups)}</b>{group_list}\n\n"
+        f"🎯 Target group: {target_str}\n"
+        f"📨 Total forwarded: <b>{processed}</b>",
         parse_mode="HTML",
         reply_markup=_main_keyboard(),
     )
+
+
+# /checkgroups ───────────────────────────────────────────────────
+
+@router.message(Command("checkgroups"))
+@router.message(F.text == "🔎 Check Groups")
+async def cmd_check_groups(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.clear()
+
+    groups = db.list_source_groups()
+    if not groups:
+        await message.answer(
+            "ℹ️ No source groups registered yet. Use ➕ Add Group.",
+            reply_markup=_main_keyboard(),
+        )
+        return
+
+    if _telethon_client is None or not _telethon_client.is_connected():
+        await message.answer(
+            "⚠️ Telethon not connected.\n"
+            "Run <code>python main.py</code> to enable group status checking.",
+            parse_mode="HTML",
+            reply_markup=_main_keyboard(),
+        )
+        return
+
+    # Send a placeholder — checking 40+ groups takes a few seconds
+    wait_msg = await message.answer(
+        f"⏳ Checking membership for <b>{len(groups)}</b> groups. "
+        f"This may take a few seconds...",
+        parse_mode="HTML",
+    )
+
+    active, inactive = await _check_all_memberships(groups)
+
+    lines = ["🔎 <b>Group Status Check</b>\n"]
+    lines.append(
+        f"✅ Subscribed: <b>{len(active)}</b>   "
+        f"❌ Not subscribed: <b>{len(inactive)}</b>\n"
+    )
+
+    if inactive:
+        lines.append("❌ <b>NOT subscribed (bot receives NO messages from these):</b>")
+        for g in inactive:
+            link = f"https://t.me/{g.username}" if g.username else f"ID: <code>{g.chat_id}</code>"
+            lines.append(f"  • <b>{_html.escape(g.title)}</b> — {link}")
+        lines.append(
+            "\n⚠️ Join these groups with your <b>monitor account</b> "
+            "to start receiving their messages."
+        )
+        lines.append("")
+
+    if active:
+        lines.append("✅ <b>Subscribed and active:</b>")
+        for g in active:
+            lines.append(f"  • {_html.escape(g.title)}")
+
+    try:
+        await wait_msg.delete()
+    except Exception:
+        pass
+
+    # Paginate if the list is very long
+    MAX_LEN = 3800
+    full_text = "\n".join(lines)
+    if len(full_text) <= MAX_LEN:
+        await message.answer(full_text, parse_mode="HTML", reply_markup=_main_keyboard())
+    else:
+        chunks, current = [], ""
+        for line in lines:
+            if len(current) + len(line) + 1 > MAX_LEN:
+                chunks.append(current)
+                current = line + "\n"
+            else:
+                current += line + "\n"
+        if current.strip():
+            chunks.append(current)
+        for idx, chunk in enumerate(chunks):
+            is_last = idx == len(chunks) - 1
+            await message.answer(
+                chunk,
+                parse_mode="HTML",
+                reply_markup=_main_keyboard() if is_last else None,
+            )
 
 
 # /cancel ─────────────────────────────────────────────────────────
