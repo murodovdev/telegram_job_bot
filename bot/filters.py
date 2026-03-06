@@ -48,6 +48,7 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
         "ish taklif",
         "ish o'rni",
         "ish joyi",
+        "ish turi",
         "ish o'rinlari",
         "ishga taklif",
         "ishga olinadi",
