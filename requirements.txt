@@ -1,0 +1,19 @@
+# ─────────────────────────────────────────────────────────────────
+#  Telegram Job Aggregator Bot – Python dependencies
+#  Install:  pip install -r requirements.txt
+# ─────────────────────────────────────────────────────────────────
+
+# Telegram client library (userbot – personal account)
+telethon==1.36.0
+
+# Telegram Bot API framework (admin control panel)
+aiogram==3.13.0
+
+# Environment variable loader
+python-dotenv==1.0.1
+
+# Async HTTP (used internally by aiogram)
+aiohttp==3.10.10
+
+# Standard library – no extra install needed:
+#   sqlite3, asyncio, logging, re, dataclasses, pathlib
