@@ -1,13 +1,21 @@
 """
 client.py – Shared Telethon TelegramClient singleton.
 
-Both monitor.py and admin_bot.py import this single client object so they
-can share one authenticated session when running in the same process.
-The client is connected in main.py before either component starts.
+Automatically selects session type:
+  • SESSION_STRING set  → StringSession (Railway / cloud, no file needed)
+  • SESSION_STRING empty → FileSession  (local development)
 """
 
 from telethon import TelegramClient
-from bot.config import API_ID, API_HASH, SESSION_NAME
+from telethon.sessions import StringSession
 
-# Single module-level client — import this everywhere instead of creating new ones.
-telethon_client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+from bot.config import API_ID, API_HASH, SESSION_STRING, SESSION_NAME
+
+if SESSION_STRING:
+    # Cloud / Railway mode — session lives in memory, loaded from env var
+    _session = StringSession(SESSION_STRING)
+else:
+    # Local development mode — session stored in a .session file
+    _session = SESSION_NAME
+
+telethon_client = TelegramClient(_session, API_ID, API_HASH)
