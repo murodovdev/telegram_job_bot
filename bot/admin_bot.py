@@ -162,9 +162,14 @@ async def _resolve_group(input_str: str) -> tuple:
     if chat_id is not None:
         return chat_id, title, username
 
-    # Both clients failed — for numeric IDs accept the raw value
+    # Both clients failed — for numeric IDs accept the raw value.
+    # Normalize positive numbers to the -100 supergroup format because
+    # Telegram always delivers group events with that prefix. Without this,
+    # the stored chat_id never matches incoming events.
     if is_numeric:
         cid = int(input_str)
+        if cid > 0:
+            cid = int(f"-100{cid}")
         logger.warning(
             "[admin_bot] Neither client resolved %s — accepting numeric ID as-is", cid
         )
@@ -432,11 +437,31 @@ async def _do_add_group(
         if not is_member:
             await message.answer(warning, parse_mode="HTML")
     else:
-        await message.answer(
-            f"⚠️ <b>{_html.escape(title)}</b> (<code>{chat_id}</code>) is already in the list.",
-            parse_mode="HTML",
-            reply_markup=_main_keyboard(),
-        )
+        # Group already exists — check if it needs reassigning to a different account
+        existing = db.get_source_group_by_id(chat_id)
+        if existing and existing.assigned_account != account:
+            db.reassign_source_group(chat_id, account)
+            link_line = f"\n🔗 https://t.me/{existing.username}" if existing.username else ""
+            await message.answer(
+                f"🔄 <b>Group reassigned!</b>\n\n"
+                f"🏢 <b>{_html.escape(existing.title)}</b>\n"
+                f"🆔 <code>{chat_id}</code>{link_line}\n"
+                f"👤 Moved from Account {existing.assigned_account} → <b>Account {account}</b>",
+                parse_mode="HTML",
+                reply_markup=_main_keyboard(),
+            )
+            # Membership check for the new account
+            client = _get_client(account)
+            is_member, warning = await _check_membership(chat_id, client)
+            if not is_member:
+                await message.answer(warning, parse_mode="HTML")
+        else:
+            await message.answer(
+                f"⚠️ <b>{_html.escape(title)}</b> (<code>{chat_id}</code>) "
+                f"is already monitored by Account {account}.",
+                parse_mode="HTML",
+                reply_markup=_main_keyboard(),
+            )
 
 
 # /removegroup ────────────────────────────────────────────────────
