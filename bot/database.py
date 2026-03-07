@@ -1,19 +1,22 @@
 """
 database.py – SQLite persistence layer.
 
-Changes in v3
--------------
-• New table: forwarded_stats — records every forwarded message with source
-  group and timestamp for analytics (/stats command).
-• New table: original_msg_index — stores (fwd_from_chat_id, fwd_from_msg_id)
-  to detect reposted/forwarded duplicates across groups.
-• New functions: record_stat(), get_stats_summary(), is_repost().
+Changes in v4 (dual-account)
+-----------------------------
+• source_groups gains assigned_account INTEGER NOT NULL DEFAULT 1
+  so each group can be assigned to account 1 or 2.
+• init_db() runs a safe ALTER TABLE migration so existing databases
+  gain the column without losing any data.
+• add_source_group() accepts assigned_account param (default 1).
+• list_source_groups() accepts optional account filter.
+• get_source_group_ids() accepts optional account filter.
+• SourceGroup dataclass gains assigned_account field.
 """
 
 import sqlite3
 import logging
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Generator, List, Optional
 
@@ -31,6 +34,7 @@ class SourceGroup:
     title: str
     username: Optional[str]
     added_at: str
+    assigned_account: int = 1
 
 
 # ── Connection helper ────────────────────────────────────────────
@@ -58,11 +62,12 @@ def init_db() -> None:
     with _connection() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS source_groups (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id   INTEGER NOT NULL UNIQUE,
-                title     TEXT    NOT NULL,
-                username  TEXT,
-                added_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id          INTEGER NOT NULL UNIQUE,
+                title            TEXT    NOT NULL,
+                username         TEXT,
+                added_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+                assigned_account INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS target_group (
@@ -82,7 +87,6 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_pm_chat ON processed_msgs (chat_id);
 
-            -- Analytics: one row per forwarded message
             CREATE TABLE IF NOT EXISTS forwarded_stats (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_chat_id INTEGER NOT NULL,
@@ -98,7 +102,6 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_fs_time
                 ON forwarded_stats (forwarded_at);
 
-            -- Repost dedup: original message origin index
             CREATE TABLE IF NOT EXISTS original_msg_index (
                 fwd_chat_id INTEGER NOT NULL,
                 fwd_msg_id  INTEGER NOT NULL,
@@ -106,19 +109,42 @@ def init_db() -> None:
                 PRIMARY KEY (fwd_chat_id, fwd_msg_id)
             );
         """)
+
+        # ── Safe migration: add assigned_account to existing tables ──
+        # SQLite does not support ALTER TABLE ADD COLUMN IF NOT EXISTS,
+        # so we attempt it and ignore the error if the column already exists.
+        try:
+            conn.execute(
+                "ALTER TABLE source_groups "
+                "ADD COLUMN assigned_account INTEGER NOT NULL DEFAULT 1"
+            )
+            logger.info("[DB] Migrated: added assigned_account column")
+        except sqlite3.OperationalError:
+            pass  # column already exists — normal on subsequent startups
+
     logger.info("[DB] Schema initialised at %s", DATABASE_PATH)
 
 
 # ── Source-group CRUD ────────────────────────────────────────────
 
-def add_source_group(chat_id: int, title: str, username: Optional[str] = None) -> bool:
+def add_source_group(
+    chat_id: int,
+    title: str,
+    username: Optional[str] = None,
+    assigned_account: int = 1,
+) -> bool:
+    """Insert a new source group. Returns True on success, False if duplicate."""
     try:
         with _connection() as conn:
             conn.execute(
-                "INSERT INTO source_groups (chat_id, title, username) VALUES (?, ?, ?)",
-                (chat_id, title, username),
+                "INSERT INTO source_groups "
+                "(chat_id, title, username, assigned_account) VALUES (?, ?, ?, ?)",
+                (chat_id, title, username, assigned_account),
             )
-        logger.info("[DB] Source group added: %s (%s)", title, chat_id)
+        logger.info(
+            "[DB] Source group added: %s (%s) → account %s",
+            title, chat_id, assigned_account,
+        )
         return True
     except sqlite3.IntegrityError:
         logger.warning("[DB] Source group already exists: %s", chat_id)
@@ -126,6 +152,7 @@ def add_source_group(chat_id: int, title: str, username: Optional[str] = None) -
 
 
 def remove_source_group(chat_id: int) -> bool:
+    """Delete a source group. Returns True if a row was actually deleted."""
     removed = False
     with _connection() as conn:
         cursor = conn.execute(
@@ -137,7 +164,9 @@ def remove_source_group(chat_id: int) -> bool:
     return removed
 
 
-def update_source_group_title(chat_id: int, title: str, username: Optional[str] = None) -> None:
+def update_source_group_title(
+    chat_id: int, title: str, username: Optional[str] = None
+) -> None:
     with _connection() as conn:
         conn.execute(
             "UPDATE source_groups SET title=?, username=? WHERE chat_id=?",
@@ -145,17 +174,52 @@ def update_source_group_title(chat_id: int, title: str, username: Optional[str] 
         )
 
 
-def list_source_groups() -> List[SourceGroup]:
+def reassign_source_group(chat_id: int, assigned_account: int) -> bool:
+    """Move a group from one account to another. Returns True if updated."""
     with _connection() as conn:
-        rows = conn.execute(
-            "SELECT * FROM source_groups ORDER BY added_at DESC"
-        ).fetchall()
+        cursor = conn.execute(
+            "UPDATE source_groups SET assigned_account=? WHERE chat_id=?",
+            (assigned_account, chat_id),
+        )
+        updated = cursor.rowcount > 0
+    if updated:
+        logger.info(
+            "[DB] Group %s reassigned to account %s", chat_id, assigned_account
+        )
+    return updated
+
+
+def list_source_groups(account: Optional[int] = None) -> List[SourceGroup]:
+    """
+    Return monitored source groups ordered by most recently added.
+    If account is given (1 or 2), return only groups for that account.
+    """
+    with _connection() as conn:
+        if account is not None:
+            rows = conn.execute(
+                "SELECT * FROM source_groups WHERE assigned_account=? ORDER BY added_at DESC",
+                (account,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM source_groups ORDER BY added_at DESC"
+            ).fetchall()
     return [SourceGroup(**dict(row)) for row in rows]
 
 
-def get_source_group_ids() -> List[int]:
+def get_source_group_ids(account: Optional[int] = None) -> List[int]:
+    """
+    Return chat_id list — used by the monitor hot-path.
+    If account is given, return only IDs for that account.
+    """
     with _connection() as conn:
-        rows = conn.execute("SELECT chat_id FROM source_groups").fetchall()
+        if account is not None:
+            rows = conn.execute(
+                "SELECT chat_id FROM source_groups WHERE assigned_account=?",
+                (account,),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT chat_id FROM source_groups").fetchall()
     return [r["chat_id"] for r in rows]
 
 
@@ -217,14 +281,6 @@ def get_processed_count() -> int:
 # ── Repost / forward dedup ───────────────────────────────────────
 
 def is_repost(fwd_chat_id: int, fwd_msg_id: int) -> bool:
-    """
-    Return True if we have already seen a message that was originally
-    posted in fwd_chat_id with fwd_msg_id.
-
-    This catches the case where the same job post is forwarded from
-    group A into groups B and C — without this check it would be
-    forwarded to the target twice.
-    """
     with _connection() as conn:
         row = conn.execute(
             "SELECT 1 FROM original_msg_index WHERE fwd_chat_id=? AND fwd_msg_id=?",
@@ -234,7 +290,6 @@ def is_repost(fwd_chat_id: int, fwd_msg_id: int) -> bool:
 
 
 def mark_original(fwd_chat_id: int, fwd_msg_id: int) -> None:
-    """Record the original (chat_id, msg_id) of a forwarded message."""
     with _connection() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO original_msg_index (fwd_chat_id, fwd_msg_id) VALUES (?, ?)",
@@ -251,7 +306,6 @@ def record_stat(
     matched_kw: Optional[str],
     match_tier: int = 1,
 ) -> None:
-    """Insert one analytics row every time a job post is forwarded."""
     with _connection() as conn:
         conn.execute(
             """INSERT INTO forwarded_stats
@@ -262,97 +316,67 @@ def record_stat(
 
 
 def get_stats_summary(days: int = 7) -> dict:
-    """
-    Return an analytics summary for the last *days* days.
-
-    Returns a dict with:
-      total         – total forwarded messages
-      by_group      – list of (title, count) sorted by count desc
-      by_lang       – dict {lang: count}
-      by_tier       – dict {1: count, 2: count}
-      today         – count for today (KST approximated as UTC+9)
-    """
     with _connection() as conn:
-        # Total in window
         total_row = conn.execute(
-            """SELECT COUNT(*) AS cnt FROM forwarded_stats
-               WHERE forwarded_at >= datetime('now', ?)""",
+            "SELECT COUNT(*) AS cnt FROM forwarded_stats "
+            "WHERE forwarded_at >= datetime('now', ?)",
             (f"-{days} days",),
         ).fetchone()
         total = total_row["cnt"] if total_row else 0
 
-        # Today count (UTC, close enough for reporting)
         today_row = conn.execute(
-            """SELECT COUNT(*) AS cnt FROM forwarded_stats
-               WHERE date(forwarded_at) = date('now')"""
+            "SELECT COUNT(*) AS cnt FROM forwarded_stats "
+            "WHERE date(forwarded_at) = date('now')"
         ).fetchone()
         today = today_row["cnt"] if today_row else 0
 
-        # Top groups
         group_rows = conn.execute(
-            """SELECT source_title, COUNT(*) AS cnt
-               FROM forwarded_stats
-               WHERE forwarded_at >= datetime('now', ?)
-               GROUP BY source_chat_id
-               ORDER BY cnt DESC
-               LIMIT 10""",
+            "SELECT source_title, COUNT(*) AS cnt FROM forwarded_stats "
+            "WHERE forwarded_at >= datetime('now', ?) "
+            "GROUP BY source_chat_id ORDER BY cnt DESC LIMIT 10",
             (f"-{days} days",),
         ).fetchall()
         by_group = [(r["source_title"], r["cnt"]) for r in group_rows]
 
-        # By language
         lang_rows = conn.execute(
-            """SELECT matched_lang, COUNT(*) AS cnt
-               FROM forwarded_stats
-               WHERE forwarded_at >= datetime('now', ?)
-               GROUP BY matched_lang""",
+            "SELECT matched_lang, COUNT(*) AS cnt FROM forwarded_stats "
+            "WHERE forwarded_at >= datetime('now', ?) GROUP BY matched_lang",
             (f"-{days} days",),
         ).fetchall()
         by_lang = {r["matched_lang"] or "unknown": r["cnt"] for r in lang_rows}
 
-        # By tier
         tier_rows = conn.execute(
-            """SELECT match_tier, COUNT(*) AS cnt
-               FROM forwarded_stats
-               WHERE forwarded_at >= datetime('now', ?)
-               GROUP BY match_tier""",
+            "SELECT match_tier, COUNT(*) AS cnt FROM forwarded_stats "
+            "WHERE forwarded_at >= datetime('now', ?) GROUP BY match_tier",
             (f"-{days} days",),
         ).fetchall()
         by_tier = {r["match_tier"]: r["cnt"] for r in tier_rows}
 
     return {
-        "total": total,
-        "today": today,
-        "by_group": by_group,
-        "by_lang": by_lang,
-        "by_tier": by_tier,
-        "days": days,
+        "total": total, "today": today,
+        "by_group": by_group, "by_lang": by_lang,
+        "by_tier": by_tier, "days": days,
     }
 
 
 def get_daily_summary() -> dict:
-    """Stats for today only — used by the scheduled evening summary."""
     with _connection() as conn:
         total_row = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM forwarded_stats WHERE date(forwarded_at) = date('now')"
+            "SELECT COUNT(*) AS cnt FROM forwarded_stats "
+            "WHERE date(forwarded_at) = date('now')"
         ).fetchone()
         total = total_row["cnt"] if total_row else 0
 
         group_rows = conn.execute(
-            """SELECT source_title, COUNT(*) AS cnt
-               FROM forwarded_stats
-               WHERE date(forwarded_at) = date('now')
-               GROUP BY source_chat_id
-               ORDER BY cnt DESC
-               LIMIT 5"""
+            "SELECT source_title, COUNT(*) AS cnt FROM forwarded_stats "
+            "WHERE date(forwarded_at) = date('now') "
+            "GROUP BY source_chat_id ORDER BY cnt DESC LIMIT 5"
         ).fetchall()
         by_group = [(r["source_title"], r["cnt"]) for r in group_rows]
 
         lang_rows = conn.execute(
-            """SELECT matched_lang, COUNT(*) AS cnt
-               FROM forwarded_stats
-               WHERE date(forwarded_at) = date('now')
-               GROUP BY matched_lang"""
+            "SELECT matched_lang, COUNT(*) AS cnt FROM forwarded_stats "
+            "WHERE date(forwarded_at) = date('now') GROUP BY matched_lang"
         ).fetchall()
         by_lang = {r["matched_lang"] or "unknown": r["cnt"] for r in lang_rows}
 
