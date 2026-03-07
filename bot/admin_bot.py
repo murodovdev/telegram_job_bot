@@ -123,30 +123,61 @@ def _get_client(account_num: int = 1):
 
 
 async def _resolve_group(input_str: str) -> tuple:
-    """Returns (chat_id, title, username) or (None, error_html, None)."""
-    client = _client_1  # always resolve via account 1
-    if client is None or not client.is_connected():
-        if input_str.lstrip("-").isdigit():
-            cid = int(input_str)
-            return cid, f"Group {cid}", None
-        return None, "⚠️ Run <code>python main.py</code> for @username lookup.", None
+    """
+    Returns (chat_id, title, username) or (None, error_html, None).
 
-    try:
-        entity = await client.get_entity(input_str)
-        from telethon.tl.types import Channel
-        chat_id  = int(f"-100{entity.id}") if isinstance(entity, Channel) else entity.id
-        title    = getattr(entity, "title", None) or str(chat_id)
-        username = getattr(entity, "username", None)
+    Resolution strategy:
+    1. Try client_1 (primary account).
+    2. If client_1 fails (e.g. banned from the group), try client_2.
+    3. If both fail but the input is a numeric ID, accept it as-is with a
+       generic title — this lets you add groups that neither account can
+       currently resolve (e.g. private groups not yet joined).
+    4. Only hard-fail for @username inputs that no client can resolve.
+    """
+    from telethon.tl.types import Channel as _Channel
+
+    is_numeric = input_str.lstrip("-").isdigit()
+
+    async def _try_client(client) -> tuple:
+        if client is None or not client.is_connected():
+            return None, None, None
+        try:
+            entity   = await client.get_entity(input_str)
+            chat_id  = int(f"-100{entity.id}") if isinstance(entity, _Channel) else entity.id
+            title    = getattr(entity, "title", None) or str(chat_id)
+            username = getattr(entity, "username", None)
+            return chat_id, title, username
+        except Exception as exc:
+            logger.warning("[admin_bot] Cannot resolve %r via %s: %s",
+                           input_str, client, exc)
+            return None, None, None
+
+    # Try account 1 first
+    chat_id, title, username = await _try_client(_client_1)
+    if chat_id is not None:
         return chat_id, title, username
-    except Exception as exc:
-        logger.warning("[admin_bot] Cannot resolve %r: %s", input_str, exc)
-        return (
-            None,
-            f"❌ Could not find group <code>{_html.escape(input_str)}</code>.\n\n"
-            "Make sure:\n• The ID/username is correct\n"
-            "• Your account is a member of that group",
-            None,
+
+    # Fall back to account 2
+    chat_id, title, username = await _try_client(_client_2)
+    if chat_id is not None:
+        return chat_id, title, username
+
+    # Both clients failed — for numeric IDs accept the raw value
+    if is_numeric:
+        cid = int(input_str)
+        logger.warning(
+            "[admin_bot] Neither client resolved %s — accepting numeric ID as-is", cid
         )
+        return cid, f"Group {cid}", None
+
+    # @username that no client could resolve — hard fail
+    return (
+        None,
+        f"❌ Could not find group <code>{_html.escape(input_str)}</code>.\n\n"
+        "Make sure:\n• The ID/username is correct\n"
+        "• At least one monitor account is a member of that group",
+        None,
+    )
 
 
 async def _check_membership(chat_id: int, client) -> tuple[bool, str]:
@@ -324,6 +355,23 @@ async def cmd_add_group_receive(message: Message, state: FSMContext):
         # Only one account — add directly to account 1
         await state.clear()
         await _do_add_group(message, chat_id, title, username, account=1)
+
+
+@router.message(AddGroupState.waiting_for_account)
+async def cmd_add_group_account_text(message: Message, state: FSMContext):
+    """Catch any text sent while the account-selection keyboard is showing."""
+    if not await _is_admin(message):
+        return
+    raw = (message.text or "").strip()
+    if raw.lower() in ("/cancel", "cancel"):
+        await state.clear()
+        await message.answer("Cancelled.", reply_markup=_main_keyboard())
+        return
+    await message.answer(
+        "👆 Please tap <b>Account 1</b> or <b>Account 2</b> using the buttons above.\n\n"
+        "Send /cancel to abort.",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data.startswith("acct:"), AddGroupState.waiting_for_account)
