@@ -174,17 +174,47 @@ def update_source_group_title(
         )
 
 
-def reassign_source_group(chat_id: int, assigned_account: int) -> bool:
-    """Move a group from one account to another. Returns True if updated."""
+def reassign_source_group(
+    chat_id: int,
+    assigned_account: int,
+    correct_chat_id: Optional[int] = None,
+    title: Optional[str] = None,
+    username: Optional[str] = None,
+) -> bool:
+    """
+    Move a group to a different account.
+    Optionally corrects the stored chat_id, title, and username at the same time
+    (used to fix legacy rows stored with a positive/un-prefixed chat_id).
+    Returns True if a row was updated.
+    """
+    new_chat_id = correct_chat_id if correct_chat_id is not None else chat_id
+
+    # Build update dynamically depending on which fields are provided
+    sets = ["assigned_account = ?"]
+    params: list = [assigned_account]
+
+    if correct_chat_id is not None and correct_chat_id != chat_id:
+        sets.append("chat_id = ?")
+        params.append(correct_chat_id)
+    if title is not None:
+        sets.append("title = ?")
+        params.append(title)
+    if username is not None:
+        sets.append("username = ?")
+        params.append(username)
+
+    params.append(chat_id)  # WHERE clause
+
     with _connection() as conn:
         cursor = conn.execute(
-            "UPDATE source_groups SET assigned_account=? WHERE chat_id=?",
-            (assigned_account, chat_id),
+            f"UPDATE source_groups SET {', '.join(sets)} WHERE chat_id = ?",
+            params,
         )
         updated = cursor.rowcount > 0
     if updated:
         logger.info(
-            "[DB] Group %s reassigned to account %s", chat_id, assigned_account
+            "[DB] Group %s reassigned to account %s (stored as %s)",
+            chat_id, assigned_account, new_chat_id,
         )
     return updated
 
@@ -224,9 +254,24 @@ def get_source_group_ids(account: Optional[int] = None) -> List[int]:
 
 
 def get_source_group_by_id(chat_id: int) -> Optional[SourceGroup]:
+    """
+    Find a source group by chat_id.
+    Searches both the given ID and its normalised -100 counterpart so that
+    legacy rows stored without the -100 prefix are still found correctly.
+    """
+    # Build both candidate IDs
+    if chat_id > 0:
+        candidates = (chat_id, int(f"-100{chat_id}"))
+    else:
+        # e.g. -1002000748619  →  also try the bare positive 2000748619
+        bare = int(str(chat_id).lstrip("-").lstrip("100") or "0") if str(abs(chat_id)).startswith("100") else abs(chat_id)
+        candidates = (chat_id, bare)
+
     with _connection() as conn:
+        placeholders = ",".join("?" * len(candidates))
         row = conn.execute(
-            "SELECT * FROM source_groups WHERE chat_id = ?", (chat_id,)
+            f"SELECT * FROM source_groups WHERE chat_id IN ({placeholders})",
+            candidates,
         ).fetchone()
     return SourceGroup(**dict(row)) if row else None
 
