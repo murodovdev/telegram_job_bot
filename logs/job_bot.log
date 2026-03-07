@@ -2193,3 +2193,57 @@ aiogram.exceptions.TelegramBadRequest: Telegram server says - Bad Request: can't
 2026-03-06 18:19:26 | INFO     | bot.monitor          | [monitor] ✅ JOB DETECTED | chat=-1001749857007 | msg=43872 | lang=russian | tier=2 | kw=['работа', 'завод']
 2026-03-06 18:19:27 | INFO     | bot.monitor          | [monitor] ✅ FORWARDED | chat=-1001749857007 | msg=43872 → target=-1003744320676
 2026-03-06 18:20:28 | INFO     | bot.monitor          | [monitor] SOURCE GROUP HIT | chat_id=-1002858032342 | msg_id=6204
+2026-03-07 10:08:47 | INFO     | main                 | ============================================================
+2026-03-07 10:08:47 | INFO     | main                 |   Korea Ish E'lonlari — Starting
+2026-03-07 10:08:47 | INFO     | main                 |   Accounts active: 2
+2026-03-07 10:08:47 | INFO     | main                 | ============================================================
+2026-03-07 10:08:47 | INFO     | bot.database         | [DB] Migrated: added assigned_account column
+2026-03-07 10:08:47 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-07 10:08:47 | INFO     | bot.monitor          | [monitor] Connecting account 1 …
+2026-03-07 10:08:49 | INFO     | bot.monitor          | [monitor] Account 1 logged in as: quvonchbek (id=2046196282)
+2026-03-07 10:08:49 | INFO     | bot.monitor          | [monitor] Account 1 monitoring 43 group(s)
+2026-03-07 10:08:49 | INFO     | bot.monitor          | [monitor] Connecting account 2 …
+2026-03-07 10:08:49 | INFO     | bot.monitor          | [monitor] Account 2 logged in as: 무로도프 (id=8513750744)
+2026-03-07 10:08:49 | INFO     | bot.monitor          | [monitor] Account 2 monitoring 0 group(s)
+2026-03-07 10:08:49 | INFO     | bot.monitor          | [monitor] Target: Korea Ish E'lonlari (-1003744320676)
+2026-03-07 10:08:49 | INFO     | bot.monitor          | [monitor] 👂 Listening on 2 account(s) …
+2026-03-07 10:08:49 | INFO     | main                 | [main] Starting admin bot and scheduler …
+2026-03-07 10:08:49 | INFO     | main                 | [main] ✅ All systems running. Press Ctrl+C to stop.
+2026-03-07 10:08:49 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-07 10:08:50 | INFO     | bot.admin_bot        | [admin_bot] Starting admin bot …
+2026-03-07 10:08:50 | INFO     | bot.scheduler        | [scheduler] Daily summary scheduler started (fires at 21:00 KST).
+2026-03-07 10:08:50 | INFO     | bot.scheduler        | [scheduler] Next daily summary in 39069 seconds (at 2026-03-07 21:00 KST).
+2026-03-07 10:09:09 | WARNING  | bot.admin_bot        | [admin_bot] Cannot resolve '-1002000748619': Cannot find any entity corresponding to "-1002000748619"
+2026-03-07 10:09:19 | WARNING  | bot.database         | [DB] Source group already exists: -1001453574665
+2026-03-07 10:09:51 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001490331350 | msg_id=86130
+2026-03-07 10:09:51 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001490331350 | msg_id=86130 | preview='✈️\xa0 ✈️✈️✈️✈️✈️✈️✈️✈️✈️\n\n✈️\xa0 ✈️✈️✈️✈️✈️✈️✈️✈️✈️\n\n✈️\xa0 ✈️✈️✈️✈️✈️✈️✈️✈️✈️\n\n🇰🇷\xa0 Seul'
+2026-03-07 10:10:22 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001749857007 | msg_id=43923
+2026-03-07 10:10:22 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001749857007 | msg_id=43923 | preview='✈️\xa0 ✈️✈️✈️✈️✈️✈️✈️✈️✈️\n\n✈️\xa0 ✈️✈️✈️✈️✈️✈️✈️✈️✈️\n\n✈️\xa0 ✈️✈️✈️✈️✈️✈️✈️✈️✈️\n\n🇰🇷\xa0 Seul'
+2026-03-07 10:11:22 | WARNING  | bot.database         | [DB] Source group already exists: -1001686180833
+2026-03-07 10:11:29 | INFO     | bot.monitor          | [monitor] 🗑️  Deleting service message | user=Mr Beshimov | msg_id=430
+2026-03-07 10:11:42 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001511479567 | msg_id=10690
+2026-03-07 10:11:42 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001511479567 | msg_id=10690 | preview='Bank wot qberamiz 01082765444'
+2026-03-07 10:12:16 | INFO     | main                 | ============================================================
+2026-03-07 10:12:16 | INFO     | main                 |   Korea Ish E'lonlari — Starting
+2026-03-07 10:12:16 | INFO     | main                 |   Accounts active: 2
+2026-03-07 10:12:16 | INFO     | main                 | ============================================================
+2026-03-07 10:12:16 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-07 10:12:16 | INFO     | bot.monitor          | [monitor] Connecting account 1 …
+2026-03-07 10:12:18 | INFO     | bot.monitor          | [monitor] Account 1 logged in as: quvonchbek (id=2046196282)
+2026-03-07 10:12:18 | INFO     | bot.monitor          | [monitor] Account 1 monitoring 43 group(s)
+2026-03-07 10:12:18 | INFO     | bot.monitor          | [monitor] Connecting account 2 …
+2026-03-07 10:12:19 | INFO     | bot.monitor          | [monitor] Account 2 logged in as: 무로도프 (id=8513750744)
+2026-03-07 10:12:19 | INFO     | bot.monitor          | [monitor] Account 2 monitoring 0 group(s)
+2026-03-07 10:12:19 | INFO     | bot.monitor          | [monitor] Target: Korea Ish E'lonlari (-1003744320676)
+2026-03-07 10:12:19 | INFO     | bot.monitor          | [monitor] 👂 Listening on 2 account(s) …
+2026-03-07 10:12:19 | INFO     | main                 | [main] Starting admin bot and scheduler …
+2026-03-07 10:12:19 | INFO     | main                 | [main] ✅ All systems running. Press Ctrl+C to stop.
+2026-03-07 10:12:19 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-07 10:12:19 | INFO     | bot.admin_bot        | [admin_bot] Starting admin bot …
+2026-03-07 10:12:19 | INFO     | bot.scheduler        | [scheduler] Daily summary scheduler started (fires at 21:00 KST).
+2026-03-07 10:12:19 | INFO     | bot.scheduler        | [scheduler] Next daily summary in 38861 seconds (at 2026-03-07 21:00 KST).
+2026-03-07 10:12:30 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002603723162 | msg_id=21768
+2026-03-07 10:12:30 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002603723162 | msg_id=21768 | preview='Готов купить USDT (TRC20). сделка сегодня. выгодно и честно.'
+2026-03-07 10:12:51 | INFO     | bot.database         | [DB] Source group added: 광주광역시 | Katta Gwangju (1686180833) → account 2
+2026-03-07 10:13:14 | WARNING  | bot.database         | [DB] Source group already exists: 1686180833
+2026-03-07 10:14:13 | INFO     | bot.monitor          | [monitor] 🗑️  Deleting service message | user=(Orzular orzuligicha qolmaydi yurak urib tursa bas) .🇰🇷🇰🇷🇰🇷🇰🇷 | msg_id=431
