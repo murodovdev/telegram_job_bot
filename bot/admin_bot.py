@@ -416,6 +416,15 @@ async def _do_add_group(
     account: int,
 ) -> None:
     """Shared logic: insert group into DB, report result, check membership."""
+
+    # ── Always normalise to the -100 supergroup format ────────────────
+    # Telegram delivers all group events with this prefix. Without it the
+    # stored chat_id never matches incoming events and monitoring silently
+    # does nothing. We fix it here unconditionally so no bad ID can ever
+    # enter the database regardless of how _resolve_group produced it.
+    if chat_id > 0:
+        chat_id = int(f"-100{chat_id}")
+
     added = db.add_source_group(
         chat_id=chat_id, title=title,
         username=username, assigned_account=account,
@@ -431,26 +440,50 @@ async def _do_add_group(
             parse_mode="HTML",
             reply_markup=_main_keyboard(),
         )
-        # Membership check against the assigned account's client
         client = _get_client(account)
         is_member, warning = await _check_membership(chat_id, client)
         if not is_member:
             await message.answer(warning, parse_mode="HTML")
     else:
-        # Group already exists — check if it needs reassigning to a different account
+        # Group already exists (possibly stored under a wrong/legacy chat_id).
+        # get_source_group_by_id searches both the positive and -100 forms.
         existing = db.get_source_group_by_id(chat_id)
-        if existing and existing.assigned_account != account:
-            db.reassign_source_group(chat_id, account)
-            link_line = f"\n🔗 https://t.me/{existing.username}" if existing.username else ""
+        if existing is None:
+            # Should never happen, but guard just in case
             await message.answer(
-                f"🔄 <b>Group reassigned!</b>\n\n"
-                f"🏢 <b>{_html.escape(existing.title)}</b>\n"
+                f"⚠️ Could not look up <code>{chat_id}</code> in the database.",
+                parse_mode="HTML", reply_markup=_main_keyboard(),
+            )
+            return
+
+        needs_id_fix    = existing.chat_id != chat_id          # legacy positive ID
+        needs_reassign  = existing.assigned_account != account
+
+        if needs_id_fix or needs_reassign:
+            old_account = existing.assigned_account
+            # Correct the chat_id and/or account in one UPDATE
+            db.reassign_source_group(
+                chat_id=existing.chat_id,       # WHERE — the value actually in the DB
+                assigned_account=account,
+                correct_chat_id=chat_id,        # fixes the stored ID if wrong
+                title=title if title != f"Group {chat_id}" else None,
+                username=username,
+            )
+            link_line = f"\n🔗 https://t.me/{username}" if username else ""
+            if needs_reassign:
+                action_line = f"👤 Moved from Account {old_account} → <b>Account {account}</b>"
+            else:
+                action_line = f"👤 Still monitored by <b>Account {account}</b>"
+            if needs_id_fix:
+                action_line += f"\n🔧 ID corrected: <code>{existing.chat_id}</code> → <code>{chat_id}</code>"
+            await message.answer(
+                f"🔄 <b>Group updated!</b>\n\n"
+                f"🏢 <b>{_html.escape(title or existing.title)}</b>\n"
                 f"🆔 <code>{chat_id}</code>{link_line}\n"
-                f"👤 Moved from Account {existing.assigned_account} → <b>Account {account}</b>",
+                f"{action_line}",
                 parse_mode="HTML",
                 reply_markup=_main_keyboard(),
             )
-            # Membership check for the new account
             client = _get_client(account)
             is_member, warning = await _check_membership(chat_id, client)
             if not is_member:
