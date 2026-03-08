@@ -2285,3 +2285,170 @@ aiogram.exceptions.TelegramBadRequest: Telegram server says - Bad Request: can't
 2026-03-07 10:18:08 | WARNING  | aiogram.dispatcher   | Sleep for 5.007397 seconds and try again... (tryings = 14, bot id = 8536661835)
 2026-03-07 10:18:18 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
 2026-03-07 10:18:18 | WARNING  | aiogram.dispatcher   | Sleep for 4.851111 seconds and try again... (tryings = 15, bot id = 8536661835)
+2026-03-08 15:56:29 | INFO     | main                 | ============================================================
+2026-03-08 15:56:29 | INFO     | main                 |   Korea Ish E'lonlari — Starting
+2026-03-08 15:56:29 | INFO     | main                 |   Accounts active: 2
+2026-03-08 15:56:29 | INFO     | main                 | ============================================================
+2026-03-08 15:56:29 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-08 15:56:29 | INFO     | bot.monitor          | [monitor] Connecting account 1 …
+2026-03-08 15:56:31 | INFO     | bot.monitor          | [monitor] Account 1 logged in as: quvonchbek (id=2046196282)
+2026-03-08 15:56:31 | INFO     | bot.monitor          | [monitor] Account 1 monitoring 43 group(s)
+2026-03-08 15:56:31 | INFO     | bot.monitor          | [monitor] Connecting account 2 …
+2026-03-08 15:56:31 | INFO     | bot.monitor          | [monitor] Account 2 logged in as: 무로도프 (id=8513750744)
+2026-03-08 15:56:31 | INFO     | bot.monitor          | [monitor] Account 2 monitoring 0 group(s)
+2026-03-08 15:56:31 | INFO     | bot.monitor          | [monitor] Target: Korea Ish E'lonlari (-1003744320676)
+2026-03-08 15:56:31 | INFO     | bot.monitor          | [monitor] 👂 Listening on 2 account(s) …
+2026-03-08 15:56:31 | INFO     | main                 | [main] Starting admin bot and scheduler …
+2026-03-08 15:56:31 | INFO     | main                 | [main] ✅ All systems running. Press Ctrl+C to stop.
+2026-03-08 15:56:31 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-08 15:56:32 | INFO     | bot.admin_bot        | [admin_bot] Starting admin bot …
+2026-03-08 15:56:32 | INFO     | bot.scheduler        | [scheduler] Daily summary scheduler started (fires at 21:00 KST).
+2026-03-08 15:56:32 | INFO     | bot.scheduler        | [scheduler] Next daily summary in 18208 seconds (at 2026-03-08 21:00 KST).
+2026-03-08 15:56:57 | INFO     | bot.database         | [DB] Source group removed: -1002179593933
+2026-03-08 15:57:33 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002729014093 | msg_id=12726
+2026-03-08 15:57:33 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002729014093 | msg_id=12726 | preview='Tik tok.lite ochmaganlar bòlsa 60 won Beraman'
+2026-03-08 15:57:49 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002466260830 | msg_id=2413
+2026-03-08 15:57:49 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002466260830 | msg_id=2413 | preview='Soat 17:00 gacha keloledigon 1 kishiga joy bor ❗️❗️❗️'
+2026-03-08 15:58:02 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001754360080 | msg_id=23756
+2026-03-08 15:58:02 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001754360080 | msg_id=23756 | preview='Tik tok.lite ochmaganlar bòlsa 60 won Beraman'
+2026-03-08 15:59:10 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001239333237 | msg_id=189134
+2026-03-08 15:59:10 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001239333237 | msg_id=189134 | preview="Bank shchot hizmatlari bor \nMurojat uchun \n01051537755\n경상남도 hududi bo'yicha \nChe"
+2026-03-08 15:59:14 | INFO     | bot.database         | [DB] Source group removed: -5173314852
+2026-03-08 15:59:58 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002628556472 | msg_id=14287
+2026-03-08 15:59:58 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002628556472 | msg_id=14287 | preview='Tik tok.lite ochmaganlar bòlsa 60 won Beraman'
+2026-03-08 16:00:21 | INFO     | bot.monitor          | [monitor] 🗑️  Deleting service message | user=🪐 | msg_id=918
+2026-03-08 16:00:28 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001511479567 | msg_id=10769
+2026-03-08 16:00:28 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001511479567 | msg_id=10769 | preview='Aboy yopish turishni biladigan 1ta bola lichkaga yossin'
+2026-03-08 16:00:36 | INFO     | bot.database         | [DB] Source group added: CHONAN ASAN UZBEKLAR ISH VA FAOLIYAT UCHUN (-1002179593933) → account 1
+2026-03-08 16:00:56 | INFO     | bot.database         | [DB] Source group added: Seongnam ish elon (-1002525696680) → account 1
+2026-03-08 16:01:11 | INFO     | bot.database         | [DB] Source group added: SONGHWANDA ISH BOR (-1001617766928) → account 1
+2026-03-08 16:01:26 | WARNING  | bot.database         | [DB] Source group already exists: -1001617766928
+2026-03-08 16:01:43 | INFO     | bot.database         | [DB] Source group added: Tegu Kyongsan Zavod 📦 Arbayt gruppa (-1001742386027) → account 1
+2026-03-08 16:02:01 | INFO     | bot.database         | [DB] Source group added: Kimpodagi uzbeklar (-1002044373140) → account 1
+2026-03-08 16:02:14 | INFO     | bot.database         | [DB] Source group added: Ansongda_ish guruhi🗡 (-1001937821109) → account 1
+2026-03-08 16:02:25 | INFO     | bot.database         | [DB] Source group added: Ansanda ish🇰🇷🇺🇿 (-1001507058507) → account 1
+2026-03-08 16:02:43 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001470356319 | msg_id=115731
+2026-03-08 16:02:43 | INFO     | bot.monitor          | [monitor/acct1] ✅ JOB DETECTED | chat=-1001470356319 | msg=115731 | lang=uzbek | kw=['ish bor', 'f4', 'f5']
+2026-03-08 16:02:44 | INFO     | bot.monitor          | [monitor/acct1] ✅ FORWARDED | chat=-1001470356319 | msg=115731 → target=-1003744320676
+2026-03-08 16:02:45 | WARNING  | bot.database         | [DB] Source group already exists: -1002044373140
+2026-03-08 16:02:48 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002603723162 | msg_id=21915
+2026-03-08 16:02:48 | INFO     | bot.monitor          | [monitor/acct1] ✅ JOB DETECTED | chat=-1002603723162 | msg=21915 | lang=uzbek | kw=['ish bor', 'f4', 'f5']
+2026-03-08 16:02:50 | INFO     | bot.monitor          | [monitor/acct1] ✅ FORWARDED | chat=-1002603723162 | msg=21915 → target=-1003744320676
+2026-03-08 16:03:04 | WARNING  | bot.database         | [DB] Source group already exists: -1001239333237
+2026-03-08 16:03:26 | WARNING  | bot.database         | [DB] Source group already exists: -1001686180833
+2026-03-08 16:03:37 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002729014093 | msg_id=12727
+2026-03-08 16:03:37 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002729014093 | msg_id=12727 | preview='Ansanga yaqin joyga bankshot kerak 8 milyon 2 kishimiz payshanba kuni kerak'
+2026-03-08 16:03:45 | WARNING  | bot.database         | [DB] Source group already exists: -1001799111985
+2026-03-08 16:04:06 | WARNING  | bot.database         | [DB] Source group already exists: -1001742386027
+2026-03-08 16:04:21 | INFO     | bot.database         | [DB] Source group added: Work in Daegu (-1001381770202) → account 1
+2026-03-08 16:04:37 | WARNING  | bot.database         | [DB] Source group already exists: -1002165832122
+2026-03-08 16:04:50 | WARNING  | bot.database         | [DB] Source group already exists: -1001617766928
+2026-03-08 16:05:06 | WARNING  | bot.database         | [DB] Source group already exists: -1001490331350
+2026-03-08 16:05:19 | WARNING  | bot.database         | [DB] Source group already exists: -1001161946122
+2026-03-08 16:05:36 | WARNING  | bot.database         | [DB] Source group already exists: -1001937821109
+2026-03-08 16:05:51 | WARNING  | bot.database         | [DB] Source group already exists: -1001716701670
+2026-03-08 16:06:25 | INFO     | bot.database         | [DB] Source group added: WORKING KOREA 🇺🇿🇰🇷 (-1002177489901) → account 1
+2026-03-08 16:06:42 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001399984082 | msg_id=348376
+2026-03-08 16:06:42 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001399984082 | msg_id=348376 | preview="Assalomu alaykum. Bugun kechga futbol yo'qmi 2ta odam bor o'ynaydigan. Futbol bo"
+2026-03-08 16:06:42 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001399984082 | msg_id=348377
+2026-03-08 16:06:42 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001399984082 | msg_id=348377 | preview='8 Martga tabiy gullar bor chiroyli qilib terib beramiz'
+2026-03-08 16:06:42 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001399984082 | msg_id=348378
+2026-03-08 16:06:42 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001399984082 | msg_id=348378 | preview='💇🏻\u200d♂️:SARTAROSH XIZMATI \n.\n🌏:대소\n.\n📲:010-2130-1125'
+2026-03-08 16:06:43 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001176433500 | msg_id=369974
+2026-03-08 16:06:43 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001176433500 | msg_id=369974 | preview='Akalar uyma uy karslar aylanib yuribdimi qandedur ibodatxonadan keldm bir baloni'
+2026-03-08 16:06:43 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001176433500 | msg_id=369975
+2026-03-08 16:06:43 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001176433500 | msg_id=369975 | preview='🌙 **Ramazon muborak!\nRo‘za tutayotganlarga Allohning rahmati va ajri nasib bo‘ls'
+2026-03-08 16:06:43 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001176433500 | msg_id=369976
+2026-03-08 16:06:43 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001176433500 | msg_id=369976 | preview='Ular cherkovlardan kelishadi. Men muslimman desangiz hop deb qaytib ketishadi.'
+2026-03-08 16:06:43 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001176433500 | msg_id=369977
+2026-03-08 16:06:43 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001176433500 | msg_id=369977 | preview='Xa shuna dodi ketti qaytib'
+2026-03-08 16:06:57 | INFO     | bot.database         | [DB] Source group added: KOREYA ISH VA MASHINA BOR, || KOREYADAGI BARCHA VIZALAR BO‘YICHA ISH VA MASHINA QIDIRISH VA XIZMATLAR (-1001669088198) → account 1
+2026-03-08 16:07:19 | WARNING  | bot.database         | [DB] Source group already exists: -1002442704231
+2026-03-08 16:07:51 | INFO     | bot.database         | [DB] Source group added: 알바 Work (Chonan / 전안) (-1003290368565) → account 1
+2026-03-08 16:08:56 | INFO     | bot.database         | [DB] Source group added: Muhammad Amin (-1001572346091) → account 1
+2026-03-08 16:09:21 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002628556472 | msg_id=14288
+2026-03-08 16:09:21 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002628556472 | msg_id=14288 | preview='Mokpodan seoulga pushta bor edi akalar'
+2026-03-08 16:10:02 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001659856299 | msg_id=104591
+2026-03-08 16:10:02 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001659856299 | msg_id=104591 | preview='Ansanga yaqin joyga bankshot kerak 8 milyon 2 kishimiz payshanba kuni kerak'
+2026-03-08 16:10:11 | WARNING  | bot.database         | [DB] Source group already exists: -1001659856299
+2026-03-08 16:10:22 | INFO     | bot.database         | [DB] Source group added: Koreya ishlar🇰🇷 (-1002043977934) → account 1
+2026-03-08 16:11:28 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001659856299 | msg_id=104592
+2026-03-08 16:11:28 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001659856299 | msg_id=104592 | preview='✈️ **ENG ARZON AVIA BILETLAR!** ✈️\n\n🌏 **Yo‘nalishlar:**\nToshkent ↔️ Incheon\nPusa'
+2026-03-08 16:12:13 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001304686518 | msg_id=124814
+2026-03-08 16:12:13 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001304686518 | msg_id=124814 | preview='Akalar daejonda katta arzon produkta giver gipermarket bormi tawab berilar'
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001176433500 | msg_id=369978
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001176433500 | msg_id=369978 | preview='Assalomu alaykum \nErtaga ertalab saharlikdan keyin Kyongsandan Seul Goyang tomon'
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001176433500 | msg_id=369979
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001176433500 | msg_id=369979 | preview='In Sha Alloh  14-mart kuni Daegu Kyongsandan Uzb Jizzaxga uchaman. Yuk boʻlsa ol'
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001176433500 | msg_id=369980
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001176433500 | msg_id=369980 | preview='Assalomu alaykum \nMashinasi bor odamga xizmat bor edi. 25kmga borib kelish kerak'
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001176433500 | msg_id=369981
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001176433500 | msg_id=369981 | preview='Инчондан тэгуга кетодгон мошина борми?'
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001470356319 | msg_id=115732
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001470356319 | msg_id=115732 | preview='D2 olmaydimi'
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001470356319 | msg_id=115733
+2026-03-08 16:14:07 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001470356319 | msg_id=115733 | preview='узур омиди'
+2026-03-08 16:15:28 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001399984082 | msg_id=348379
+2026-03-08 16:15:28 | INFO     | bot.monitor          | [monitor/acct1] ✅ JOB DETECTED | chat=-1001399984082 | msg=348379 | lang=uzbek | kw=['иш бор']
+2026-03-08 16:15:28 | INFO     | bot.monitor          | [monitor/acct1] ✅ FORWARDED | chat=-1001399984082 | msg=348379 → target=-1003744320676
+2026-03-08 16:15:59 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001399984082 | msg_id=348380
+2026-03-08 16:15:59 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001399984082 | msg_id=348380 | preview='Ассалому алейкум \nдоллар бор вон керак\nтесода булса куришиб майдалаб оламиз\n500$'
+2026-03-08 16:17:00 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002044373140 | msg_id=13913
+2026-03-08 16:17:00 | ERROR    | telethon.client.updates | Unhandled exception on _on_new_message
+Traceback (most recent call last):
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\telethon\client\updates.py", line 570, in _dispatch_update
+    await callback(event)
+  File "D:\VS Code\telegram_job_bot\bot\monitor.py", line 92, in _on_new_message
+    text = message.text or message.caption or message.raw_text or ""
+                           ^^^^^^^^^^^^^^^
+AttributeError: 'Message' object has no attribute 'caption'. Did you mean: 'action'?
+2026-03-08 16:17:01 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002044373140 | msg_id=13914
+2026-03-08 16:17:01 | ERROR    | telethon.client.updates | Unhandled exception on _on_new_message
+Traceback (most recent call last):
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\telethon\client\updates.py", line 570, in _dispatch_update
+    await callback(event)
+  File "D:\VS Code\telegram_job_bot\bot\monitor.py", line 92, in _on_new_message
+    text = message.text or message.caption or message.raw_text or ""
+                           ^^^^^^^^^^^^^^^
+AttributeError: 'Message' object has no attribute 'caption'. Did you mean: 'action'?
+2026-03-08 16:17:01 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002044373140 | msg_id=13915
+2026-03-08 16:17:01 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002044373140 | msg_id=13915 | preview='Qolgan baholash tizimini bilmoqchi bolsangiz qo\'ng\'iroq qiling yoki kanalga a"zo'
+2026-03-08 16:17:54 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001799111985 | msg_id=180279
+2026-03-08 16:17:54 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001799111985 | msg_id=180279 | preview='💇🏻\u200d♂️:SARTAROSH XIZMATI \n.\n🌏:대소\n.\n📲:010-2130-1125'
+2026-03-08 16:17:54 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001799111985 | msg_id=180280
+2026-03-08 16:17:54 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001799111985 | msg_id=180280 | preview='Ассалому алейкум \nдоллар бор вон керак\nтесода булса куришиб майдалаб оламиз\n500$'
+2026-03-08 16:17:58 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001671731305 | msg_id=79934
+2026-03-08 16:17:58 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001671731305 | msg_id=79934 | preview='Boʻlmayabdiyu umuman'
+2026-03-08 16:17:58 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001671731305 | msg_id=79935
+2026-03-08 16:17:58 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001671731305 | msg_id=79935 | preview='Sheindan bekorga brend kiyim  zakaz qilish orgatib qoyaman\nKirish bilanoq 74 min'
+2026-03-08 16:18:03 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001857660612 | msg_id=67095
+2026-03-08 16:18:03 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001857660612 | msg_id=67095 | preview='Mokpodan seoulga pushta bor edi akalar'
+2026-03-08 16:18:08 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001212678634 | msg_id=167063
+2026-03-08 16:18:08 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001212678634 | msg_id=167063 | preview='Обменяю **наличные корейские воны (WON) на USDT**.\nФормат сделки — **личная встр'
+2026-03-08 16:18:16 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001749857007 | msg_id=44042
+2026-03-08 16:18:16 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001749857007 | msg_id=44042 | preview='Берем в аренду банковские счета💭\nЛюбые банки кроме(Hanpass,ibk)\nОплата еженедель'
+2026-03-08 16:18:18 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001205456019 | msg_id=65644
+2026-03-08 16:18:18 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001205456019 | msg_id=65644 | preview='🔴Assalam alaikum wa rohmatullohi wa barokatuh\n\nBir Misrlik akada jigar cancer (r'
+2026-03-08 16:18:45 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001212678634 | msg_id=167066
+2026-03-08 16:18:45 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001212678634 | msg_id=167066 | preview='Берем в аренду банковские счета💭\nЛюбые банки кроме(Hanpass,ibk)\nОплата еженедель'
+2026-03-08 16:20:38 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001749857007 | msg_id=44043
+2026-03-08 16:20:38 | INFO     | bot.monitor          | [monitor/acct1] ✅ JOB DETECTED | chat=-1001749857007 | msg=44043 | lang=uzbek | kw=['f2', 'f4']
+2026-03-08 16:20:39 | INFO     | bot.monitor          | [monitor/acct1] ✅ FORWARDED | chat=-1001749857007 | msg=44043 → target=-1003744320676
+2026-03-08 16:21:08 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:21:08 | WARNING  | aiogram.dispatcher   | Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8536661835)
+2026-03-08 16:21:14 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:21:14 | WARNING  | aiogram.dispatcher   | Sleep for 1.332522 seconds and try again... (tryings = 1, bot id = 8536661835)
+2026-03-08 16:21:19 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:21:19 | WARNING  | aiogram.dispatcher   | Sleep for 1.777672 seconds and try again... (tryings = 2, bot id = 8536661835)
+2026-03-08 16:21:26 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:21:26 | WARNING  | aiogram.dispatcher   | Sleep for 2.360255 seconds and try again... (tryings = 3, bot id = 8536661835)
+2026-03-08 16:21:32 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:21:32 | WARNING  | aiogram.dispatcher   | Sleep for 2.974145 seconds and try again... (tryings = 4, bot id = 8536661835)
+2026-03-08 16:21:39 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:21:39 | WARNING  | aiogram.dispatcher   | Sleep for 3.882188 seconds and try again... (tryings = 5, bot id = 8536661835)
+2026-03-08 16:21:48 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:21:48 | WARNING  | aiogram.dispatcher   | Sleep for 5.060684 seconds and try again... (tryings = 6, bot id = 8536661835)
+2026-03-08 16:21:58 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:21:58 | WARNING  | aiogram.dispatcher   | Sleep for 4.942944 seconds and try again... (tryings = 7, bot id = 8536661835)
+2026-03-08 16:22:08 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:22:08 | WARNING  | aiogram.dispatcher   | Sleep for 4.985736 seconds and try again... (tryings = 8, bot id = 8536661835)
