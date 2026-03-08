@@ -2452,3 +2452,26 @@ AttributeError: 'Message' object has no attribute 'caption'. Did you mean: 'acti
 2026-03-08 16:21:58 | WARNING  | aiogram.dispatcher   | Sleep for 4.942944 seconds and try again... (tryings = 7, bot id = 8536661835)
 2026-03-08 16:22:08 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
 2026-03-08 16:22:08 | WARNING  | aiogram.dispatcher   | Sleep for 4.985736 seconds and try again... (tryings = 8, bot id = 8536661835)
+2026-03-08 16:26:29 | INFO     | main                 | ============================================================
+2026-03-08 16:26:29 | INFO     | main                 |   Korea Ish E'lonlari — Starting
+2026-03-08 16:26:29 | INFO     | main                 |   Accounts active: 2
+2026-03-08 16:26:29 | INFO     | main                 | ============================================================
+2026-03-08 16:26:29 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-08 16:26:29 | INFO     | bot.monitor          | [monitor] Connecting account 1 …
+2026-03-08 16:26:31 | INFO     | bot.monitor          | [monitor] Account 1 logged in as: quvonchbek (id=2046196282)
+2026-03-08 16:26:31 | INFO     | bot.monitor          | [monitor] Account 1 monitoring 54 group(s)
+2026-03-08 16:26:31 | INFO     | bot.monitor          | [monitor] Connecting account 2 …
+2026-03-08 16:26:31 | INFO     | bot.monitor          | [monitor] Account 2 logged in as: 무로도프 (id=8513750744)
+2026-03-08 16:26:31 | INFO     | bot.monitor          | [monitor] Account 2 monitoring 0 group(s)
+2026-03-08 16:26:31 | INFO     | bot.monitor          | [monitor] Target: Korea Ish E'lonlari (-1003744320676)
+2026-03-08 16:26:31 | INFO     | bot.monitor          | [monitor] 👂 Listening on 2 account(s) …
+2026-03-08 16:26:31 | INFO     | main                 | [main] Starting admin bot and scheduler …
+2026-03-08 16:26:31 | INFO     | main                 | [main] ✅ All systems running. Press Ctrl+C to stop.
+2026-03-08 16:26:31 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-08 16:26:32 | INFO     | bot.admin_bot        | [admin_bot] Starting admin bot …
+2026-03-08 16:26:32 | INFO     | bot.scheduler        | [scheduler] Daily summary scheduler started (fires at 21:00 KST).
+2026-03-08 16:26:32 | INFO     | bot.scheduler        | [scheduler] Next daily summary in 16408 seconds (at 2026-03-08 21:00 KST).
+2026-03-08 16:26:37 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:26:37 | WARNING  | aiogram.dispatcher   | Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8536661835)
+2026-03-08 16:26:42 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-03-08 16:26:42 | WARNING  | aiogram.dispatcher   | Sleep for 1.258344 seconds and try again... (tryings = 1, bot id = 8536661835)
