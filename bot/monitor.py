@@ -89,7 +89,7 @@ def _make_message_handler(assigned_client, account_num: int):
         )
 
         # ── 2. Extract text (plain text or media caption) ─────────
-        text = message.text or message.caption or message.raw_text or ""
+        text = (getattr(message, "text", None) or getattr(message, "raw_text", None) or "").strip()
         if not text.strip():
             logger.info(
                 "[monitor/acct%s] SKIPPED (no text/caption) | chat_id=%s | msg_id=%s",
