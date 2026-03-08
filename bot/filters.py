@@ -45,6 +45,7 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
         "odam kerak",
         "odamlar kerak",
         "kishi kerak",
+        "kishi kere",
         "kishiga ish",
         "kishilar kerak",
         "ish taklif",
