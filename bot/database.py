@@ -11,6 +11,13 @@ Changes in v4 (dual-account)
 • list_source_groups() accepts optional account filter.
 • get_source_group_ids() accepts optional account filter.
 • SourceGroup dataclass gains assigned_account field.
+
+Changes in v5 (user blocking)
+------------------------------
+• New table: blocked_users — stores permanently blocked Telegram user IDs.
+• New functions: block_user(), unblock_user(), is_blocked(), list_blocked_users().
+• is_blocked() is called on the hot-path in monitor.py (Gate 2.5) using only
+  message.sender_id — no Telegram API call needed, zero latency overhead.
 """
 
 import sqlite3
@@ -26,6 +33,15 @@ logger = logging.getLogger(__name__)
 
 
 # ── Data-Transfer Objects ────────────────────────────────────────
+
+@dataclass
+class BlockedUser:
+    user_id:    int
+    full_name:  str
+    username:   Optional[str]
+    reason:     Optional[str]
+    blocked_at: str
+
 
 @dataclass
 class SourceGroup:
@@ -107,6 +123,15 @@ def init_db() -> None:
                 fwd_msg_id  INTEGER NOT NULL,
                 seen_at     TEXT NOT NULL DEFAULT (datetime('now')),
                 PRIMARY KEY (fwd_chat_id, fwd_msg_id)
+            );
+
+            -- Blocked users: messages from these senders are never forwarded
+            CREATE TABLE IF NOT EXISTS blocked_users (
+                user_id    INTEGER PRIMARY KEY,
+                full_name  TEXT    NOT NULL DEFAULT '',
+                username   TEXT,
+                reason     TEXT,
+                blocked_at TEXT    NOT NULL DEFAULT (datetime('now'))
             );
         """)
 
@@ -340,6 +365,70 @@ def mark_original(fwd_chat_id: int, fwd_msg_id: int) -> None:
             "INSERT OR IGNORE INTO original_msg_index (fwd_chat_id, fwd_msg_id) VALUES (?, ?)",
             (fwd_chat_id, fwd_msg_id),
         )
+
+
+# ── Blocked users ─────────────────────────────────────────────────
+
+def block_user(
+    user_id: int,
+    full_name: str = "",
+    username: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> bool:
+    """
+    Add a user to the blocked list.
+    Returns True if newly blocked, False if already blocked.
+    """
+    try:
+        with _connection() as conn:
+            conn.execute(
+                "INSERT INTO blocked_users (user_id, full_name, username, reason) "
+                "VALUES (?, ?, ?, ?)",
+                (user_id, full_name, username, reason),
+            )
+        logger.info("[DB] User blocked: %s (%s)", full_name or user_id, user_id)
+        return True
+    except sqlite3.IntegrityError:
+        logger.warning("[DB] User already blocked: %s", user_id)
+        return False
+
+
+def unblock_user(user_id: int) -> bool:
+    """
+    Remove a user from the blocked list.
+    Returns True if the user was found and removed.
+    """
+    with _connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM blocked_users WHERE user_id = ?", (user_id,)
+        )
+        removed = cursor.rowcount > 0
+    if removed:
+        logger.info("[DB] User unblocked: %s", user_id)
+    return removed
+
+
+def is_blocked(user_id: int) -> bool:
+    """
+    Hot-path check — called on every incoming message.
+    Uses only the integer user_id, no Telegram API call needed.
+    """
+    if not user_id:
+        return False
+    with _connection() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM blocked_users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    return row is not None
+
+
+def list_blocked_users() -> List[BlockedUser]:
+    """Return all blocked users ordered by most recently blocked."""
+    with _connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM blocked_users ORDER BY blocked_at DESC"
+        ).fetchall()
+    return [BlockedUser(**dict(row)) for row in rows]
 
 
 # ── Analytics ────────────────────────────────────────────────────

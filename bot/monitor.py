@@ -89,11 +89,22 @@ def _make_message_handler(assigned_client, account_num: int):
         )
 
         # ── 2. Extract text (plain text or media caption) ─────────
-        text = (getattr(message, "text", None) or getattr(message, "raw_text", None) or "").strip()
+        text = message.text or message.caption or message.raw_text or ""
         if not text.strip():
             logger.info(
                 "[monitor/acct%s] SKIPPED (no text/caption) | chat_id=%s | msg_id=%s",
                 account_num, chat_id, msg_id,
+            )
+            return
+
+        # ── 2.5 Blocked-user gate ─────────────────────────────────
+        # message.sender_id is a plain integer available with zero cost —
+        # no Telegram API call needed. Check before repost/dedup lookups.
+        sender_id = message.sender_id
+        if sender_id and db.is_blocked(sender_id):
+            logger.info(
+                "[monitor/acct%s] SKIPPED (blocked user) | user_id=%s | chat_id=%s | msg_id=%s",
+                account_num, sender_id, chat_id, msg_id,
             )
             return
 

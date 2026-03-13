@@ -68,6 +68,15 @@ class TestKeywordState(StatesGroup):
     waiting_for_text = State()
 
 
+class BlockUserState(StatesGroup):
+    waiting_for_user = State()   # admin forwards a msg or sends a user ID
+    waiting_for_reason = State() # optional reason
+
+
+class UnblockUserState(StatesGroup):
+    waiting_for_selection = State()
+
+
 # ── Auth guard ────────────────────────────────────────────────────
 
 async def _is_admin(message: Message) -> bool:
@@ -86,7 +95,7 @@ def _main_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="➖ Remove Group"), KeyboardButton(text="🎯 Set Target")],
             [KeyboardButton(text="📊 Status"),       KeyboardButton(text="🧪 Test Send")],
             [KeyboardButton(text="📈 Stats"),        KeyboardButton(text="🔍 Test Keyword")],
-            [KeyboardButton(text="🔎 Check Groups")],
+            [KeyboardButton(text="🔎 Check Groups"), KeyboardButton(text="🚫 Blocked Users")],
         ],
         resize_keyboard=True,
     )
@@ -101,6 +110,20 @@ def _remove_keyboard(groups: list) -> InlineKeyboardMarkup:
             callback_data=f"rm:{g.chat_id}",
         )])
     buttons.append([InlineKeyboardButton(text="🔙 Cancel", callback_data="rm:cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _unblock_keyboard(blocked: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for u in blocked:
+        label = u.full_name or f"ID {u.user_id}"
+        if u.username:
+            label += f" (@{u.username})"
+        buttons.append([InlineKeyboardButton(
+            text=f"✅ Unblock {label}",
+            callback_data=f"unblock:{u.user_id}",
+        )])
+    buttons.append([InlineKeyboardButton(text="🔙 Cancel", callback_data="unblock:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -881,6 +904,215 @@ async def cmd_check_groups(message: Message, state: FSMContext):
                 parse_mode="HTML",
                 reply_markup=_main_keyboard() if is_last else None,
             )
+
+
+# /blockuser ──────────────────────────────────────────────────────
+
+@router.message(Command("blockuser"))
+@router.message(F.text == "🚫 Blocked Users")
+async def cmd_block_start(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.clear()
+
+    # "🚫 Blocked Users" button shows the list + block/unblock options
+    blocked = db.list_blocked_users()
+    lines = [f"🚫 <b>Blocked Users ({len(blocked)})</b>\n"]
+    if blocked:
+        for i, u in enumerate(blocked, 1):
+            name = _html.escape(u.full_name or f"ID {u.user_id}")
+            uname = f" @{u.username}" if u.username else ""
+            reason = f"\n     Reason: {_html.escape(u.reason)}" if u.reason else ""
+            lines.append(
+                f"{i}. <b>{name}</b>{uname}\n"
+                f"   ID: <code>{u.user_id}</code>\n"
+                f"   Blocked: {u.blocked_at}{reason}\n"
+            )
+    else:
+        lines.append("No users are currently blocked.")
+
+    lines.append("\nUse /addblock to block a user.")
+    lines.append("Use /unblockuser to unblock a user.")
+
+    await message.answer(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_main_keyboard(),
+    )
+
+
+@router.message(Command("addblock"))
+async def cmd_addblock_start(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.set_state(BlockUserState.waiting_for_user)
+    await message.answer(
+        "🚫 <b>Block a User</b>\n\n"
+        "Send the user's Telegram ID, or <b>forward any message</b> from "
+        "that user to this chat.\n\n"
+        "💡 To get a user's ID: forward their message to @userinfobot.\n\n"
+        "/cancel to abort.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+
+@router.message(BlockUserState.waiting_for_user)
+async def cmd_addblock_receive_user(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+
+    raw = (message.text or "").strip()
+    if raw.lower() == "/cancel":
+        await state.clear()
+        await message.answer("Cancelled.", reply_markup=_main_keyboard())
+        return
+
+    user_id   = None
+    full_name = ""
+    username  = None
+
+    # Case 1: admin forwarded a message from the target user
+    fwd = getattr(message, "forward_from", None)
+    if fwd is not None:
+        user_id   = fwd.id
+        full_name = f"{fwd.first_name or ''} {fwd.last_name or ''}".strip()
+        username  = getattr(fwd, "username", None)
+
+    # Case 2: admin typed a numeric user ID
+    elif raw.lstrip("-").isdigit():
+        user_id = int(raw)
+
+    if not user_id:
+        await message.answer(
+            "❌ Could not identify a user.\n\n"
+            "Please either:\n"
+            "• Forward a message from the user to this chat, or\n"
+            "• Send their numeric Telegram user ID.\n\n"
+            "/cancel to abort.",
+            parse_mode="HTML",
+        )
+        return
+
+    # Save what we know so far, then ask for an optional reason
+    await state.set_data({
+        "user_id":   user_id,
+        "full_name": full_name,
+        "username":  username,
+    })
+    await state.set_state(BlockUserState.waiting_for_reason)
+
+    name_display = _html.escape(full_name) if full_name else f"<code>{user_id}</code>"
+    await message.answer(
+        f"👤 User identified: <b>{name_display}</b>\n"
+        f"🆔 <code>{user_id}</code>\n\n"
+        "Add a reason for blocking (optional).\n"
+        "Send <b>-</b> to skip, or type a short reason (e.g. <i>spam, repeated posts</i>).",
+        parse_mode="HTML",
+    )
+
+
+@router.message(BlockUserState.waiting_for_reason)
+async def cmd_addblock_receive_reason(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+
+    raw = (message.text or "").strip()
+    if raw.lower() == "/cancel":
+        await state.clear()
+        await message.answer("Cancelled.", reply_markup=_main_keyboard())
+        return
+
+    data      = await state.get_data()
+    await state.clear()
+
+    user_id   = data["user_id"]
+    full_name = data["full_name"]
+    username  = data.get("username")
+    reason    = None if raw == "-" else raw
+
+    blocked = db.block_user(
+        user_id=user_id,
+        full_name=full_name,
+        username=username,
+        reason=reason,
+    )
+
+    name_display = _html.escape(full_name) if full_name else f"ID {user_id}"
+    uname_line   = f"\n👤 @{username}" if username else ""
+    reason_line  = f"\n📝 Reason: {_html.escape(reason)}" if reason else ""
+
+    if blocked:
+        await message.answer(
+            f"✅ <b>User blocked!</b>\n\n"
+            f"<b>{name_display}</b>{uname_line}\n"
+            f"🆔 <code>{user_id}</code>{reason_line}\n\n"
+            f"All future messages from this user will be ignored.",
+            parse_mode="HTML",
+            reply_markup=_main_keyboard(),
+        )
+    else:
+        await message.answer(
+            f"⚠️ <b>{name_display}</b> (<code>{user_id}</code>) is already blocked.",
+            parse_mode="HTML",
+            reply_markup=_main_keyboard(),
+        )
+
+
+# /unblockuser ────────────────────────────────────────────────────
+
+@router.message(Command("unblockuser"))
+async def cmd_unblock_start(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.clear()
+
+    blocked = db.list_blocked_users()
+    if not blocked:
+        await message.answer(
+            "ℹ️ No users are currently blocked.",
+            reply_markup=_main_keyboard(),
+        )
+        return
+
+    await message.answer(
+        "✅ <b>Unblock a User</b>\n\nTap a user to unblock them:",
+        parse_mode="HTML",
+        reply_markup=_unblock_keyboard(blocked),
+    )
+
+
+@router.callback_query(F.data.startswith("unblock:"))
+async def cb_unblock_user(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_USER_ID:
+        await callback.answer("Access denied.", show_alert=True)
+        return
+
+    payload = callback.data[8:]  # strip "unblock:"
+    if payload == "cancel":
+        await callback.message.edit_text("Cancelled.")
+        await callback.message.answer("Back to menu.", reply_markup=_main_keyboard())
+        await callback.answer()
+        return
+
+    user_id = int(payload)
+    blocked = db.list_blocked_users()
+    user    = next((u for u in blocked if u.user_id == user_id), None)
+    name    = _html.escape(user.full_name if user and user.full_name else str(user_id))
+
+    removed = db.unblock_user(user_id)
+    if removed:
+        await callback.message.edit_text(
+            f"✅ <b>{name}</b> (<code>{user_id}</code>) has been unblocked.",
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.edit_text(
+            f"⚠️ <code>{user_id}</code> was not found in the blocked list.",
+            parse_mode="HTML",
+        )
+    await callback.message.answer("Back to menu.", reply_markup=_main_keyboard())
+    await callback.answer()
 
 
 # /cancel ─────────────────────────────────────────────────────────
