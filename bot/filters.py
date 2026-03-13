@@ -93,7 +93,9 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
         "вакансия",
         "арбайт бор", 
         "D2 oladi",
-        "d2 mumkin", 
+        "d2 mumkin",
+        "Ishni biladigan odam kerak",
+        "ishni bilishi kerak" 
         ],
 
     # ── Russian ────────────────────────────────────────────────────
