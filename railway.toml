@@ -1,0 +1,21 @@
+# railway.toml — Railway deployment configuration
+# Docs: https://docs.railway.com/reference/config-as-code
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+# Graceful shutdown: give the process time to flush DB and close connections
+# before Railway kills it. This prevents DB corruption on redeploy.
+restartPolicyType  = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+# railway.toml cannot define Volumes — you must do that in the Railway dashboard:
+#
+#   1. Open your Railway project
+#   2. Click your service → "Volumes" tab → "New Volume"
+#   3. Set Mount Path: /data
+#   4. In Variables, add:  DATABASE_PATH = /data/job_bot.db
+#
+# The /data volume persists across ALL deployments. Your database will
+# never be wiped again.
