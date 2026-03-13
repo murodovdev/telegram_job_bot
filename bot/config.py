@@ -77,6 +77,20 @@ DATABASE_PATH : Path = (
     else _BASE_DIR / _db_raw
 )
 
+# ── Content deduplication ─────────────────────────────────────────
+# How many hours to remember forwarded job posts for duplicate detection.
+# A post identical or very similar to one forwarded within this window is skipped.
+# Default: 24 hours (job listings are typically re-posted daily).
+# Set to 0 to disable content deduplication entirely.
+DEDUP_WINDOW_HOURS: int = int(os.getenv("DEDUP_WINDOW_HOURS", "24"))
+
+# Similarity threshold for near-duplicate detection (0.0–1.0).
+# 1.0 = exact match only.  0.85 = allows ~15% difference (extra lines, edits).
+# Recommended range: 0.80–0.90. Below 0.75 produces too many false positives.
+DEDUP_SIMILARITY_THRESHOLD: float = float(
+    os.getenv("DEDUP_SIMILARITY_THRESHOLD", "0.85")
+)
+
 # ── Logging ───────────────────────────────────────────────────────
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 

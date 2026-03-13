@@ -31,6 +31,7 @@ from telethon.tl.types import (
 import bot.database as db
 from bot.client import client_1, all_clients
 from bot.config import PHONE_NUMBER, PHONE_NUMBER_2, TARGET_GROUP
+from bot.config import DEDUP_WINDOW_HOURS, DEDUP_SIMILARITY_THRESHOLD
 from bot.filters import is_job_message
 from bot.notifier import notify_admin
 from bot.utils import (
@@ -156,6 +157,31 @@ def _make_message_handler(assigned_client, account_num: int):
             )
             return
 
+        # ── 5.5 Content duplicate gate ────────────────────────────
+        # Catches copy-paste spam: the same (or nearly identical) job listing
+        # posted manually in multiple groups — different chat/msg IDs, no
+        # fwd_from header, so Gates 3 and 4 cannot catch it.
+        #
+        # Two-tier check (see database.py for full design rationale):
+        #   Tier 1 — exact SHA-256 hash match (O(1))
+        #   Tier 2 — SequenceMatcher similarity against recent texts (O(n))
+        #
+        # Only runs on confirmed job posts to keep the dedup table small.
+        # The hash is registered only after a successful send (below).
+        if DEDUP_WINDOW_HOURS > 0:
+            is_dup, dup_reason = db.is_content_duplicate(
+                text,
+                window_hours=DEDUP_WINDOW_HOURS,
+                similarity_threshold=DEDUP_SIMILARITY_THRESHOLD,
+            )
+            if is_dup:
+                logger.info(
+                    "[monitor/acct%s] SKIPPED (content duplicate) | %s | "
+                    "chat_id=%s | msg_id=%s",
+                    account_num, dup_reason, chat_id, msg_id,
+                )
+                return
+
         # Confirmed job post — safe to register origin
         if _pending_original:
             db.mark_original(*_pending_original)
@@ -214,6 +240,10 @@ def _make_message_handler(assigned_client, account_num: int):
 
         if success:
             db.mark_processed(chat_id, msg_id)
+            # Register content fingerprint AFTER successful send so that
+            # a failed send never permanently blacklists content.
+            if DEDUP_WINDOW_HOURS > 0:
+                db.record_content_hash(text, source_chat=chat_id, source_msg=msg_id)
             logger.info(
                 "[monitor/acct%s] ✅ FORWARDED | chat=%s | msg=%s → target=%s",
                 account_num, chat_id, msg_id, target,

@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 import bot.database as db
+from bot.config import DEDUP_WINDOW_HOURS
 from bot.notifier import notify_admin
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,8 @@ async def run_daily_summary_scheduler() -> None:
 
         try:
             await _send_daily_summary()
+            # Prune expired content_hashes daily so the table stays lean
+            db.cleanup_content_hashes(DEDUP_WINDOW_HOURS)
         except Exception as exc:
             logger.error("[scheduler] Error sending daily summary: %s", exc)
 
