@@ -118,11 +118,11 @@ def build_job_post(
         owner_part = safe_author_name
 
     return (
-        f"⚠️ <b>Yangi xabar ma'lumotlari:</b>\n\n"
-        f"Guruh: {group_part}\n"
-        f"Xabar egasi: {owner_part}\n"
-        f"Xabar vaqti: {time_str}\n\n"
-        f"Xabar matni:\n"
+        f"<b>⚠️ Yangi ish e’loni:</b>\n\n"
+        f"<b>Guruh:</b> {group_part}\n"
+        f"<b>Muallif:</b> {owner_part}\n"
+        f"<b>Vaqt:</b> {time_str}\n\n"
+        f"<b>Xabar matni:</b>\n"
         f"{safe_message_text}"
     )
 
