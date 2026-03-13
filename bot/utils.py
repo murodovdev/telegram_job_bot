@@ -88,7 +88,7 @@ def build_job_post(
     if message_time.tzinfo is None:
         message_time = message_time.replace(tzinfo=timezone.utc)
     kst_time = message_time.astimezone(KST)
-    time_str = kst_time.strftime("%Y-%m-%d %H:%M:%S")
+    time_str = kst_time.strftime("%Y-%m-%d %H:%M:%S (KST)")
 
     # Escape all user-supplied content to prevent HTML parse errors
     safe_group_title  = html.escape(group_title)
@@ -108,11 +108,11 @@ def build_job_post(
         owner_part = safe_author_name
 
     post = (
-        f"<b>⚠️ Yangi xabar ma'lumotlari:</b>\n\n"
-        f"<b>Guruh:</b> {group_part}\n"
-        f"<b>Xabar egasi:</b> {owner_part}\n"
-        f"<b>Xabar vaqti:</b> {time_str}\n\n"
-        f"<b>Xabar matni:</b> \n{safe_message_text}"
+        f"⚠️ <b>New Message Information:</b>\n\n"
+        f"Group: {group_part}\n"
+        f"Message Owner: {owner_part}\n"
+        f"Message Time: {time_str}\n\n"
+        f"Message Text: {safe_message_text}"
     )
     return post
 
@@ -155,8 +155,10 @@ def get_chat_display_name(chat) -> str:
 
 # ── Safe send (HTML mode) ─────────────────────────────────────────
 
+# ── Safe send (HTML mode) ─────────────────────────────────────────
+
 MAX_RETRIES = 3
-RETRY_DELAY = 5  # seconds
+RETRY_DELAY = 5  # seconds between non-FloodWait retries
 
 
 async def safe_send_message(
@@ -165,22 +167,46 @@ async def safe_send_message(
     text: str,
 ) -> bool:
     """
-    Send a message in HTML parse mode with exponential back-off retry.
+    Send a message in HTML parse mode with intelligent retry logic.
 
-    Uses HTML (not Markdown) to prevent parse failures on messages that
-    contain *, _, [, ] or other Markdown-special characters.
+    Handles two distinct failure modes differently:
+
+    FloodWaitError — Telegram imposes a mandatory wait and tells us exactly
+        how many seconds to wait. We must respect that number exactly.
+        Retrying before the wait expires always fails again and wastes the
+        retry budget. This was the root cause of 5-minute forwarding delays:
+        the old code retried after 5s while Telegram required 180s, so all
+        three attempts failed and the message was dropped.
+
+    All other errors — network hiccups, temporary server errors, etc.
+        Use exponential back-off (5s, 10s) before retrying.
 
     Returns True on success, False after all retries are exhausted.
     """
+    from telethon.errors import FloodWaitError
+
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             await client.send_message(
                 target,
                 text,
                 parse_mode="html",
-                link_preview=False,   # prevents "VIEW GROUP" / "VIEW USER" preview cards
+                link_preview=False,
             )
             return True
+
+        except FloodWaitError as e:
+            # Telegram gave us the exact number of seconds we must wait.
+            # Add a 5-second buffer so we don't immediately hit the limit again.
+            wait = e.seconds + 5
+            logger.warning(
+                "[utils] ⏳ FloodWait %ds on attempt %d/%d — sleeping exactly %ds",
+                e.seconds, attempt, MAX_RETRIES, wait,
+            )
+            await asyncio.sleep(wait)
+            # After a FloodWait we retry immediately (don't count it as a
+            # failed attempt in the same way — the wait was forced by Telegram).
+
         except Exception as exc:
             logger.warning(
                 "[utils] Send attempt %d/%d to %s failed: %s",

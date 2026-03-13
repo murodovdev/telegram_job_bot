@@ -169,6 +169,98 @@ def init_db() -> None:
     from bot.config import DEDUP_WINDOW_HOURS
     cleanup_content_hashes(DEDUP_WINDOW_HOURS)
 
+    # Warm the in-memory caches immediately so the first message after
+    # startup does not pay the cold-cache DB round-trip penalty.
+    _cache_refresh_source_groups()
+    _cache_refresh_blocked_users()
+    _cache_refresh_target()
+
+
+# ── In-memory hot-path cache ─────────────────────────────────────
+#
+# Gate 1  (source-group check)  and Gate 2.5 (blocked-user check)  are
+# called on EVERY incoming message. Opening a fresh SQLite connection per
+# call blocks the asyncio event loop for ~3–5 ms each time. With 42 groups
+# active and many non-job messages arriving, this adds up to tens of
+# milliseconds of stall per second — enough to cause the multi-second
+# delays observed in production.
+#
+# Solution: maintain three in-process sets/values that mirror the DB.
+# They are refreshed after every write that modifies the relevant table,
+# so they are always consistent with the DB without any polling or TTL.
+# Read operations (the hot path) become pure Python set lookups — O(1),
+# no I/O, no event-loop blocking.
+
+_source_group_ids_by_account: dict = {}  # {account_num: frozenset(chat_ids)}
+_blocked_user_ids: frozenset = frozenset()
+_cached_target_id: Optional[int] = None
+
+
+def _cache_refresh_source_groups() -> None:
+    """Rebuild the source-group ID cache from the database."""
+    global _source_group_ids_by_account
+    with _connection() as conn:
+        rows = conn.execute(
+            "SELECT chat_id, assigned_account FROM source_groups"
+        ).fetchall()
+    by_account: dict = {}
+    for row in rows:
+        acct = row["assigned_account"]
+        by_account.setdefault(acct, set()).add(row["chat_id"])
+    _source_group_ids_by_account = {k: frozenset(v) for k, v in by_account.items()}
+    logger.debug("[DB] source-group cache refreshed: %s",
+                 {k: len(v) for k, v in _source_group_ids_by_account.items()})
+
+
+def _cache_refresh_blocked_users() -> None:
+    """Rebuild the blocked-user ID cache from the database."""
+    global _blocked_user_ids
+    with _connection() as conn:
+        rows = conn.execute("SELECT user_id FROM blocked_users").fetchall()
+    _blocked_user_ids = frozenset(r["user_id"] for r in rows)
+    logger.debug("[DB] blocked-user cache refreshed: %d entries", len(_blocked_user_ids))
+
+
+def _cache_refresh_target() -> None:
+    """Refresh the cached target group ID."""
+    global _cached_target_id
+    with _connection() as conn:
+        row = conn.execute("SELECT chat_id FROM target_group WHERE id = 1").fetchone()
+    _cached_target_id = row["chat_id"] if row else None
+    logger.debug("[DB] target cache refreshed: %s", _cached_target_id)
+
+
+def get_source_group_ids_cached(account: Optional[int] = None) -> frozenset:
+    """
+    O(1) hot-path read — returns a frozenset from the in-memory cache.
+    Falls back to a live DB query only if the cache is empty (first call
+    before init_db has run, which should never happen in normal operation).
+    """
+    if not _source_group_ids_by_account:
+        _cache_refresh_source_groups()
+    if account is None:
+        # Union of all accounts
+        result: set = set()
+        for ids in _source_group_ids_by_account.values():
+            result |= ids
+        return frozenset(result)
+    return _source_group_ids_by_account.get(account, frozenset())
+
+
+def is_blocked_cached(user_id: int) -> bool:
+    """O(1) hot-path read from the in-memory blocked-user set."""
+    if not _blocked_user_ids and user_id:
+        # Cache might be cold if called before init_db — rare, handle gracefully
+        _cache_refresh_blocked_users()
+    return user_id in _blocked_user_ids
+
+
+def get_cached_target_id() -> Optional[int]:
+    """Return the cached target group chat_id. Refreshes once if not set."""
+    if _cached_target_id is None:
+        _cache_refresh_target()
+    return _cached_target_id
+
 
 # ── Source-group CRUD ────────────────────────────────────────────
 
@@ -190,6 +282,7 @@ def add_source_group(
             "[DB] Source group added: %s (%s) → account %s",
             title, chat_id, assigned_account,
         )
+        _cache_refresh_source_groups()
         return True
     except sqlite3.IntegrityError:
         logger.warning("[DB] Source group already exists: %s", chat_id)
@@ -206,6 +299,7 @@ def remove_source_group(chat_id: int) -> bool:
         removed = cursor.rowcount > 0
     if removed:
         logger.info("[DB] Source group removed: %s", chat_id)
+        _cache_refresh_source_groups()
     return removed
 
 
@@ -261,6 +355,7 @@ def reassign_source_group(
             "[DB] Group %s reassigned to account %s (stored as %s)",
             chat_id, assigned_account, new_chat_id,
         )
+        _cache_refresh_source_groups()
     return updated
 
 
@@ -335,6 +430,7 @@ def set_target_group(chat_id: int, title: str, username: Optional[str] = None) -
                 updated_at = excluded.updated_at
         """, (chat_id, title, username))
     logger.info("[DB] Target group set: %s (%s)", title, chat_id)
+    _cache_refresh_target()
 
 
 def get_target_group() -> Optional[dict]:
@@ -572,6 +668,7 @@ def block_user(
                 (user_id, full_name, username, reason),
             )
         logger.info("[DB] User blocked: %s (%s)", full_name or user_id, user_id)
+        _cache_refresh_blocked_users()
         return True
     except sqlite3.IntegrityError:
         logger.warning("[DB] User already blocked: %s", user_id)
@@ -590,6 +687,7 @@ def unblock_user(user_id: int) -> bool:
         removed = cursor.rowcount > 0
     if removed:
         logger.info("[DB] User unblocked: %s", user_id)
+        _cache_refresh_blocked_users()
     return removed
 
 
