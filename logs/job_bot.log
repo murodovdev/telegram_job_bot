@@ -2596,3 +2596,107 @@ AttributeError: 'Message' object has no attribute 'caption'. Did you mean: 'acti
 2026-03-13 12:25:34 | WARNING  | aiogram.dispatcher   | Sleep for 2.166352 seconds and try again... (tryings = 3, bot id = 8536661835)
 2026-03-13 12:25:44 | ERROR    | aiogram.dispatcher   | Failed to fetch updates - TelegramConflictError: Telegram server says - Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
 2026-03-13 12:25:44 | WARNING  | aiogram.dispatcher   | Sleep for 2.948437 seconds and try again... (tryings = 4, bot id = 8536661835)
+2026-03-13 12:26:20 | INFO     | main                 | ============================================================
+2026-03-13 12:26:20 | INFO     | main                 |   Korea Ish E'lonlari — Starting
+2026-03-13 12:26:20 | INFO     | main                 |   Accounts active: 2
+2026-03-13 12:26:20 | INFO     | main                 | ============================================================
+2026-03-13 12:26:20 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-13 12:26:20 | INFO     | bot.monitor          | [monitor] Connecting account 1 …
+2026-03-13 12:26:21 | INFO     | bot.monitor          | [monitor] Account 1 logged in as: quvonchbek (id=2046196282)
+2026-03-13 12:26:21 | INFO     | bot.monitor          | [monitor] Account 1 monitoring 51 group(s)
+2026-03-13 12:26:21 | INFO     | bot.monitor          | [monitor] Connecting account 2 …
+2026-03-13 12:26:24 | INFO     | bot.monitor          | [monitor] Account 2 logged in as: 무로토브 (id=8367892539)
+2026-03-13 12:26:24 | INFO     | bot.monitor          | [monitor] Account 2 monitoring 3 group(s)
+2026-03-13 12:26:24 | INFO     | bot.monitor          | [monitor] Target: Korea Ish E'lonlari (-1003744320676)
+2026-03-13 12:26:24 | INFO     | bot.monitor          | [monitor] 👂 Listening on 2 account(s) …
+2026-03-13 12:26:24 | INFO     | main                 | [main] Starting admin bot and scheduler …
+2026-03-13 12:26:24 | INFO     | main                 | [main] ✅ All systems running. Press Ctrl+C to stop.
+2026-03-13 12:26:24 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-13 12:26:24 | INFO     | bot.admin_bot        | [admin_bot] Starting admin bot …
+2026-03-13 12:26:24 | INFO     | bot.scheduler        | [scheduler] Daily summary scheduler started (fires at 21:00 KST).
+2026-03-13 12:26:24 | INFO     | bot.scheduler        | [scheduler] Next daily summary in 30816 seconds (at 2026-03-13 21:00 KST).
+2026-03-13 12:26:56 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001304686518 | msg_id=125349
+2026-03-13 12:26:56 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001304686518 | msg_id=125349 | preview='Assalom alekum \n\nUy shartnoma qiberoladiganlar bormi'
+2026-03-13 12:28:07 | WARNING  | bot.database         | [DB] Source group already exists: -1001742386027
+2026-03-13 12:28:07 | INFO     | bot.database         | [DB] Group -1001742386027 reassigned to account 2 (stored as -1001742386027)
+2026-03-13 12:28:36 | WARNING  | bot.database         | [DB] Source group already exists: -1001453574665
+2026-03-13 12:28:47 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002603723162 | msg_id=24666
+2026-03-13 12:28:47 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002603723162 | msg_id=24666 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:29:38 | INFO     | bot.database         | [DB] Source group added: KIMHE ISH (-1001440276367) → account 2
+2026-03-13 12:29:44 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002729014093 | msg_id=13428
+2026-03-13 12:29:44 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002729014093 | msg_id=13428 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:30:48 | INFO     | bot.monitor          | [monitor/acct2] SOURCE GROUP HIT | chat_id=-1001440276367 | msg_id=78960
+2026-03-13 12:30:48 | INFO     | bot.monitor          | [monitor/acct2] SKIPPED (no keywords) | chat_id=-1001440276367 | msg_id=78960 | preview='Assalomu Alaykum Cheongjudan Busan Kimhega qaytadiganlar bormi bugun kechlarga 6'
+2026-03-13 12:31:01 | INFO     | bot.database         | [DB] Source group added: New tekpe 전주 (-1001271491452) → account 1
+2026-03-13 12:31:05 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001490331350 | msg_id=87073
+2026-03-13 12:31:05 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001490331350 | msg_id=87073 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:31:27 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002043977934 | msg_id=22850
+2026-03-13 12:31:27 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002043977934 | msg_id=22850 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:31:42 | INFO     | bot.database         | [DB] Source group added: PUYO (-1001409501480) → account 1
+2026-03-13 12:31:51 | INFO     | bot.database         | [DB] Source group added: Uzbeks in Suwon (-1001854101393) → account 1
+2026-03-13 12:31:59 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002418112272 | msg_id=8000
+2026-03-13 12:31:59 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002418112272 | msg_id=8000 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:32:12 | INFO     | bot.database         | [DB] Source group added: KOREA ISHLAR777 (-1001857257128) → account 1
+2026-03-13 12:32:34 | WARNING  | bot.database         | [DB] Source group already exists: -1002179593933
+2026-03-13 12:32:41 | INFO     | bot.monitor          | [monitor/acct2] SOURCE GROUP HIT | chat_id=-1001440276367 | msg_id=78961
+2026-03-13 12:32:41 | INFO     | bot.monitor          | [monitor/acct2] SKIPPED (no keywords) | chat_id=-1001440276367 | msg_id=78961 | preview='Ertaga ertalabga shu manzilga boradigan mashina bormi kimhe Busan tomondan.'
+2026-03-13 12:32:42 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002044373140 | msg_id=14186
+2026-03-13 12:32:42 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002044373140 | msg_id=14186 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:33:10 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002179593933 | msg_id=57578
+2026-03-13 12:33:10 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002179593933 | msg_id=57578 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:33:19 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002301178007 | msg_id=7063
+2026-03-13 12:33:19 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002301178007 | msg_id=7063 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:33:43 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001490331350 | msg_id=87074
+2026-03-13 12:33:43 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001490331350 | msg_id=87074 | preview='🏆 THE PREMIUM OTC AD \n🌟 ALTURA X GLOBAL OTC 🌟\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+2026-03-13 12:33:44 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001490331350 | msg_id=87075
+2026-03-13 12:33:44 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001490331350 | msg_id=87075 | preview='\u200e❗️[Manju](tg://user?id=7402132075) **iltimos reklama tarqatmang!**'
+2026-03-13 12:33:46 | WARNING  | bot.admin_bot        | [admin_bot] Cannot resolve '-1001152680949' via <telethon.client.telegramclient.TelegramClient object at 0x000002BCFFBB11C0>: Cannot find any entity corresponding to "-1001152680949"
+2026-03-13 12:33:47 | WARNING  | bot.admin_bot        | [admin_bot] Cannot resolve '-1001152680949' via <telethon.client.telegramclient.TelegramClient object at 0x000002BCFFEFC800>: Cannot find any entity corresponding to "-1001152680949"
+2026-03-13 12:33:47 | WARNING  | bot.admin_bot        | [admin_bot] Neither client resolved -1001152680949 — accepting numeric ID as-is
+2026-03-13 12:33:48 | INFO     | bot.database         | [DB] Source group added: Group -1001152680949 (-1001152680949) → account 1
+2026-03-13 12:33:49 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002858032342 | msg_id=6672
+2026-03-13 12:33:49 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002858032342 | msg_id=6672 | preview='Jumlamizdan'
+2026-03-13 12:34:06 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001507058507 | msg_id=18177
+2026-03-13 12:34:06 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001507058507 | msg_id=18177 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:34:12 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001381770202 | msg_id=29195
+2026-03-13 12:34:12 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001381770202 | msg_id=29195 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:34:28 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002666264446 | msg_id=1281
+2026-03-13 12:34:28 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002666264446 | msg_id=1281 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:34:41 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001857660612 | msg_id=67513
+2026-03-13 12:34:41 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001857660612 | msg_id=67513 | preview='16-kuni Mokopdan Incheon aeraporga boradigala boʻlsa olib ketaman'
+2026-03-13 12:34:41 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001399984082 | msg_id=350490
+2026-03-13 12:34:41 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001399984082 | msg_id=350490 | preview='Moshin ustalar bormi yordamila kerak edi.'
+2026-03-13 12:34:42 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001271491452 | msg_id=289037
+2026-03-13 12:34:42 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001271491452 | msg_id=289037 | preview='📌‼️☎️💇'
+2026-03-13 12:35:25 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002628556472 | msg_id=14526
+2026-03-13 12:35:25 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002628556472 | msg_id=14526 | preview='16-kuni Mokopdan Incheon aeraporga boradiganla boʻlsa olib ketaman'
+2026-03-13 12:37:01 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001409501480 | msg_id=43172
+2026-03-13 12:37:01 | ERROR    | telethon.client.updates | Unhandled exception on _on_new_message
+Traceback (most recent call last):
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\telethon\client\updates.py", line 570, in _dispatch_update
+    await callback(event)
+  File "D:\VS Code\telegram_job_bot\bot\monitor.py", line 92, in _on_new_message
+    text = message.text or message.caption or message.raw_text or ""
+                           ^^^^^^^^^^^^^^^
+AttributeError: 'Message' object has no attribute 'caption'. Did you mean: 'action'?
+2026-03-13 12:38:09 | INFO     | bot.monitor          | [monitor/acct2] SOURCE GROUP HIT | chat_id=-1001742386027 | msg_id=55753
+2026-03-13 12:38:09 | INFO     | bot.monitor          | [monitor/acct2] SKIPPED (no keywords) | chat_id=-1001742386027 | msg_id=55753 | preview='✅️Tarjimon hizmati\n✅️ Vizalar bo‘yicha,hujjat ishlari\n✅️Apostil,notarial,tarjima'
+2026-03-13 12:38:10 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001399984082 | msg_id=350491
+2026-03-13 12:38:10 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001399984082 | msg_id=350491 | preview='Teso termenaldi oldida jincheonga taxi kerak'
+2026-03-13 12:38:10 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001399984082 | msg_id=350492
+2026-03-13 12:38:10 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001399984082 | msg_id=350492 | preview='Olindi'
+2026-03-13 12:38:10 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001399984082 | msg_id=350493
+2026-03-13 12:38:10 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001399984082 | msg_id=350493 | preview='Lic qaravorin'
+2026-03-13 12:38:40 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001381770202 | msg_id=29196
+2026-03-13 12:38:40 | INFO     | bot.monitor          | [monitor/acct1] ✅ JOB DETECTED | chat=-1001381770202 | msg=29196 | lang=russian | kw=['трудоустройство']
+2026-03-13 12:38:41 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002603723162 | msg_id=24667
+2026-03-13 12:38:41 | INFO     | bot.monitor          | [monitor/acct1] ✅ JOB DETECTED | chat=-1002603723162 | msg=24667 | lang=russian | kw=['трудоустройство']
+2026-03-13 12:38:42 | INFO     | bot.monitor          | [monitor/acct1] ✅ FORWARDED | chat=-1001381770202 | msg=29196 → target=-1003744320676
+2026-03-13 12:38:42 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002729014093 | msg_id=13429
+2026-03-13 12:38:42 | INFO     | bot.monitor          | [monitor/acct1] ✅ JOB DETECTED | chat=-1002729014093 | msg=13429 | lang=russian | kw=['трудоустройство']
+2026-03-13 12:38:43 | INFO     | bot.monitor          | [monitor/acct1] ✅ FORWARDED | chat=-1002603723162 | msg=24667 → target=-1003744320676
+2026-03-13 12:38:43 | INFO     | bot.monitor          | [monitor/acct1] ✅ FORWARDED | chat=-1002729014093 | msg=13429 → target=-1003744320676
+2026-03-13 12:40:28 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001490331350 | msg_id=87076
+2026-03-13 12:40:28 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001490331350 | msg_id=87076 | preview='**🚀 Daily USDT Buyers | High & Stable Returns\n\nWe are a large Hong Kong–China co'
+2026-03-13 12:40:30 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001490331350 | msg_id=87077
+2026-03-13 12:40:30 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001490331350 | msg_id=87077 | preview='\u200e❗️[Saranya](tg://user?id=1975433520) **iltimos reklama tarqatmang!**'
