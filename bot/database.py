@@ -133,11 +133,26 @@ def init_db() -> None:
                 reason     TEXT,
                 blocked_at TEXT    NOT NULL DEFAULT (datetime('now'))
             );
+
+            -- Content fingerprints for cross-group duplicate detection.
+            -- Stores a SHA-256 hash of each forwarded message's normalised text
+            -- plus the first 500 chars of normalised text for fuzzy comparison.
+            -- Rows older than DEDUP_WINDOW_HOURS are pruned on startup.
+            CREATE TABLE IF NOT EXISTS content_hashes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                text_hash   TEXT    NOT NULL,
+                norm_text   TEXT    NOT NULL DEFAULT '',
+                source_chat INTEGER NOT NULL,
+                source_msg  INTEGER NOT NULL,
+                seen_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_ch_hash ON content_hashes (text_hash);
+            CREATE INDEX IF NOT EXISTS idx_ch_time ON content_hashes (seen_at);
         """)
 
-        # ── Safe migration: add assigned_account to existing tables ──
+        # ── Safe migrations ───────────────────────────────────────
         # SQLite does not support ALTER TABLE ADD COLUMN IF NOT EXISTS,
-        # so we attempt it and ignore the error if the column already exists.
+        # so we attempt each migration and silently ignore already-exists errors.
         try:
             conn.execute(
                 "ALTER TABLE source_groups "
@@ -148,6 +163,11 @@ def init_db() -> None:
             pass  # column already exists — normal on subsequent startups
 
     logger.info("[DB] Schema initialised at %s", DATABASE_PATH)
+
+    # Prune expired content_hashes on every startup. This keeps the table
+    # lean and ensures the fuzzy comparison only runs against recent rows.
+    from bot.config import DEDUP_WINDOW_HOURS
+    cleanup_content_hashes(DEDUP_WINDOW_HOURS)
 
 
 # ── Source-group CRUD ────────────────────────────────────────────
@@ -365,6 +385,171 @@ def mark_original(fwd_chat_id: int, fwd_msg_id: int) -> None:
             "INSERT OR IGNORE INTO original_msg_index (fwd_chat_id, fwd_msg_id) VALUES (?, ?)",
             (fwd_chat_id, fwd_msg_id),
         )
+
+
+# ── Content deduplication ─────────────────────────────────────────
+#
+# Design rationale
+# ────────────────
+# Gate 3 (repost check) catches Telegram-native forwards where fwd_from is
+# present. It does NOT catch the most common real-world spam pattern: a user
+# (or multiple different users) manually copying and pasting the same job
+# listing text into many groups. Each copy has a different chat_id and
+# message_id, so Gate 3 and Gate 4 both pass silently.
+#
+# This section adds Gate 5.5 — a two-tier content fingerprinting check that
+# runs only on confirmed job posts (after the keyword filter), keeping the
+# dedup table small and the check fast:
+#
+#   Tier 1 — Exact hash:  SHA-256 of normalised text.  O(1) DB lookup.
+#             Catches perfect copy-paste with zero false positives.
+#
+#   Tier 2 — Fuzzy match: SequenceMatcher (Python stdlib) similarity ratio
+#             against all normalised texts seen within the dedup window.
+#             Catches minor edits, appended phone numbers, extra blank lines.
+#             Only runs when the exact hash misses (typically < 200 rows to
+#             compare against — well within SQLite performance limits).
+#
+# Hash registration happens AFTER a successful send — same discipline as
+# mark_processed() — so a failed send never permanently blacklists content.
+
+import hashlib
+import re
+import unicodedata
+from difflib import SequenceMatcher
+
+
+def _normalise_text(text: str) -> str:
+    """
+    Produce a canonical form of text for duplicate comparison.
+
+    Steps:
+    1. Unicode NFC normalisation (合 == 合, different byte sequences → same)
+    2. Lowercase
+    3. Strip URLs (they vary but content is the same)
+    4. Strip phone number patterns (same ad, different contact number)
+    5. Collapse all whitespace to single spaces
+    6. Strip leading/trailing whitespace
+    """
+    # Unicode normalise
+    text = unicodedata.normalize("NFC", text)
+    # Lowercase (safe for Korean — it has no case)
+    text = text.lower()
+    # Remove URLs
+    text = re.sub(r"https?://\S+|www\.\S+", "", text)
+    # Remove phone-like patterns: strings of digits, dashes, spaces, parens ≥ 7 chars
+    text = re.sub(r"[\d\s\-\+\(\)]{7,}", " ", text)
+    # Collapse all whitespace (spaces, newlines, tabs) to a single space
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _content_hash(text: str) -> str:
+    """SHA-256 hex digest of the normalised text."""
+    return hashlib.sha256(_normalise_text(text).encode("utf-8")).hexdigest()
+
+
+def is_content_duplicate(
+    text: str,
+    window_hours: int = 24,
+    similarity_threshold: float = 0.85,
+) -> tuple:
+    """
+    Two-tier duplicate check for a candidate job-post text.
+
+    Returns (is_dup: bool, reason: str).
+
+    Tier 1 — Exact:  O(1) indexed hash lookup.
+    Tier 2 — Fuzzy:  O(n) SequenceMatcher against recent norm_text rows,
+                     where n = number of posts forwarded in the last window_hours
+                     (typically < 200 — well within performance limits).
+
+    The window_hours=0 escape hatch disables the check entirely.
+    """
+    if window_hours <= 0:
+        return False, ""
+
+    norm  = _normalise_text(text)
+    h     = hashlib.sha256(norm.encode("utf-8")).hexdigest()
+    since = f"-{window_hours} hours"
+
+    with _connection() as conn:
+        # Tier 1: exact hash
+        exact = conn.execute(
+            "SELECT source_chat, source_msg FROM content_hashes "
+            "WHERE text_hash = ? AND seen_at >= datetime('now', ?)",
+            (h, since),
+        ).fetchone()
+        if exact:
+            return True, (
+                f"exact duplicate of msg {exact['source_msg']} "
+                f"in chat {exact['source_chat']}"
+            )
+
+        # Tier 2: fuzzy — only if there are recent rows to compare against
+        # Truncate norm to 500 chars; similarity on longer texts is expensive
+        # and job listings rarely exceed that after normalisation.
+        norm_sample = norm[:500]
+        if not norm_sample:
+            return False, ""
+
+        recent_rows = conn.execute(
+            "SELECT id, norm_text, source_chat, source_msg FROM content_hashes "
+            "WHERE seen_at >= datetime('now', ?)",
+            (since,),
+        ).fetchall()
+
+    for row in recent_rows:
+        stored = row["norm_text"][:500]
+        if not stored:
+            continue
+        ratio = SequenceMatcher(None, norm_sample, stored, autojunk=False).ratio()
+        if ratio >= similarity_threshold:
+            return True, (
+                f"near-duplicate (similarity={ratio:.2f}) of msg "
+                f"{row['source_msg']} in chat {row['source_chat']}"
+            )
+
+    return False, ""
+
+
+def record_content_hash(
+    text: str,
+    source_chat: int,
+    source_msg: int,
+) -> None:
+    """
+    Store the content fingerprint of a successfully forwarded job post.
+    Called AFTER send succeeds — never before — so failed sends don't
+    permanently blacklist content.
+    """
+    norm = _normalise_text(text)
+    h    = hashlib.sha256(norm.encode("utf-8")).hexdigest()
+    with _connection() as conn:
+        conn.execute(
+            "INSERT INTO content_hashes (text_hash, norm_text, source_chat, source_msg) "
+            "VALUES (?, ?, ?, ?)",
+            (h, norm[:500], source_chat, source_msg),
+        )
+
+
+def cleanup_content_hashes(window_hours: int = 24) -> int:
+    """
+    Delete content_hashes rows older than window_hours.
+    Called on startup and by the daily scheduler to keep the table lean.
+    Returns the number of rows deleted.
+    """
+    if window_hours <= 0:
+        return 0
+    with _connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM content_hashes WHERE seen_at < datetime('now', ?)",
+            (f"-{window_hours} hours",),
+        )
+        deleted = cursor.rowcount
+    if deleted:
+        logger.info("[DB] Pruned %d expired content_hashes rows", deleted)
+    return deleted
 
 
 # ── Blocked users ─────────────────────────────────────────────────
