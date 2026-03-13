@@ -47,6 +47,20 @@ from bot.utils import (
 
 logger = logging.getLogger(__name__)
 
+# ── Race-condition guard for Gate 5.5 ────────────────────────────
+#
+# Problem: two accounts can receive the same copy-paste message within
+# milliseconds of each other.  Both call is_content_duplicate() before
+# either has finished sending and recording the hash, so both see "no
+# duplicate" and both forward the post.
+#
+# Fix: maintain a module-level set of SHA-256 hashes that are currently
+# in-flight (between duplicate-check and hash-registration).  The second
+# coroutine to arrive sees the hash already in the set and drops the message.
+# The set entry is always removed in a finally block so a failed send never
+# permanently blocks the content.
+_pending_hashes: set = set()
+
 
 def _get_target_id() -> Optional[int]:
     cfg = db.get_target_group()
@@ -116,9 +130,13 @@ def _make_message_handler(assigned_client, account_num: int):
         fwd = getattr(message, "fwd_from", None)
         if fwd is not None:
             orig_chat = getattr(fwd, "from_id", None)
+            # channel_post      — set when forwarded from a channel
+            # saved_from_msg_id — set when forwarded from Saved Messages
+            # message_id        — set when forwarded from a group (was missing before)
             orig_msg  = (
                 getattr(fwd, "channel_post", None)
                 or getattr(fwd, "saved_from_msg_id", None)
+                or getattr(fwd, "message_id", None)
             )
             orig_chat_id = None
             if orig_chat is not None:
@@ -168,15 +186,29 @@ def _make_message_handler(assigned_client, account_num: int):
         #   Tier 1 — exact SHA-256 hash match (O(1))
         #   Tier 2 — SequenceMatcher similarity against recent texts (O(n))
         #
-        # Only runs on confirmed job posts to keep the dedup table small.
-        # The hash is registered only after a successful send (below).
+        # _pending_hashes guards against the race condition where two accounts
+        # receive the same message within milliseconds — both would pass the
+        # DB duplicate check before either records the hash.  The second
+        # coroutine to arrive sees the hash in _pending_hashes and exits early.
+        content_hash: Optional[str] = None
         if DEDUP_WINDOW_HOURS > 0:
+            content_hash = db._content_hash(text)
+            if content_hash in _pending_hashes:
+                logger.info(
+                    "[monitor/acct%s] SKIPPED (in-flight duplicate) | "
+                    "chat_id=%s | msg_id=%s",
+                    account_num, chat_id, msg_id,
+                )
+                return
+            _pending_hashes.add(content_hash)
+
             is_dup, dup_reason = db.is_content_duplicate(
                 text,
                 window_hours=DEDUP_WINDOW_HOURS,
                 similarity_threshold=DEDUP_SIMILARITY_THRESHOLD,
             )
             if is_dup:
+                _pending_hashes.discard(content_hash)
                 logger.info(
                     "[monitor/acct%s] SKIPPED (content duplicate) | %s | "
                     "chat_id=%s | msg_id=%s",
@@ -253,36 +285,43 @@ def _make_message_handler(assigned_client, account_num: int):
             matched_keywords=result.matched_keywords,
         )
 
-        success = await safe_send_message(assigned_client, target, post_text)
+        try:
+            success = await safe_send_message(assigned_client, target, post_text)
 
-        if success:
-            db.mark_processed(chat_id, msg_id)
-            # Register content fingerprint AFTER successful send so that
-            # a failed send never permanently blacklists content.
-            if DEDUP_WINDOW_HOURS > 0:
-                db.record_content_hash(text, source_chat=chat_id, source_msg=msg_id)
-            logger.info(
-                "[monitor/acct%s] ✅ FORWARDED | chat=%s | msg=%s → target=%s",
-                account_num, chat_id, msg_id, target,
-            )
-            db.record_stat(
-                source_chat_id=chat_id,
-                source_title=group_title,
-                matched_lang=result.matched_lang,
-                matched_kw=", ".join(result.matched_keywords),
-                match_tier=result.match_tier,
-            )
-        else:
-            logger.error(
-                "[monitor/acct%s] ❌ SEND FAILED | chat=%s | msg=%s | target=%s",
-                account_num, chat_id, msg_id, target,
-            )
-            await notify_admin(
-                f"❌ <b>Send failed</b> (account {account_num}) after 3 retries.\n\n"
-                f"Source: {group_title} (<code>{chat_id}</code>)\n"
-                f"Message ID: <code>{msg_id}</code>\n"
-                f"Target: <code>{target}</code>"
-            )
+            if success:
+                db.mark_processed(chat_id, msg_id)
+                # Register content fingerprint AFTER successful send so that
+                # a failed send never permanently blacklists content.
+                if DEDUP_WINDOW_HOURS > 0:
+                    db.record_content_hash(text, source_chat=chat_id, source_msg=msg_id)
+                logger.info(
+                    "[monitor/acct%s] ✅ FORWARDED | chat=%s | msg=%s → target=%s",
+                    account_num, chat_id, msg_id, target,
+                )
+                db.record_stat(
+                    source_chat_id=chat_id,
+                    source_title=group_title,
+                    matched_lang=result.matched_lang,
+                    matched_kw=", ".join(result.matched_keywords),
+                    match_tier=result.match_tier,
+                )
+            else:
+                logger.error(
+                    "[monitor/acct%s] ❌ SEND FAILED | chat=%s | msg=%s | target=%s",
+                    account_num, chat_id, msg_id, target,
+                )
+                await notify_admin(
+                    f"❌ <b>Send failed</b> (account {account_num}) after 3 retries.\n\n"
+                    f"Source: {group_title} (<code>{chat_id}</code>)\n"
+                    f"Message ID: <code>{msg_id}</code>\n"
+                    f"Target: <code>{target}</code>"
+                )
+        finally:
+            # Always release the pending-hash lock regardless of outcome.
+            # On success: hash is now in the DB so future duplicates are caught there.
+            # On failure: release so a manual retry or the next occurrence can go through.
+            if content_hash:
+                _pending_hashes.discard(content_hash)
 
     return _on_new_message
 

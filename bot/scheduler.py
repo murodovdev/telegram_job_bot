@@ -84,8 +84,10 @@ async def run_daily_summary_scheduler() -> None:
 
         try:
             await _send_daily_summary()
-            # Prune expired content_hashes daily so the table stays lean
+            # Nightly maintenance: prune all tables that would grow forever
             db.cleanup_content_hashes(DEDUP_WINDOW_HOURS)
+            db.cleanup_processed_msgs(keep_days=30)
+            db.cleanup_original_msg_index(keep_days=7)
         except Exception as exc:
             logger.error("[scheduler] Error sending daily summary: %s", exc)
 
