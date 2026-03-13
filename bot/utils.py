@@ -88,7 +88,7 @@ def build_job_post(
     if message_time.tzinfo is None:
         message_time = message_time.replace(tzinfo=timezone.utc)
     kst_time = message_time.astimezone(KST)
-    time_str = kst_time.strftime("%Y-%m-%d %H:%M:%S (KST)")
+    time_str = kst_time.strftime("%Y-%m-%d %H:%M:%S")
 
     # Escape all user-supplied content to prevent HTML parse errors
     safe_group_title  = html.escape(group_title)
