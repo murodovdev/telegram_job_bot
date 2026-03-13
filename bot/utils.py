@@ -108,11 +108,11 @@ def build_job_post(
         owner_part = safe_author_name
 
     post = (
-        f"⚠️ <b>New Message Information:</b>\n\n"
-        f"Group: {group_part}\n"
-        f"Message Owner: {owner_part}\n"
-        f"Message Time: {time_str}\n\n"
-        f"Message Text: {safe_message_text}"
+        f"<b>⚠️ Yangi ish e’loni: </b>\n\n"
+        f"<b>Guruh:</b> {group_part}\n"
+        f"<b>Muallif:</b> {owner_part}\n"
+        f"<b>Vaqt:</b> {time_str}\n\n"
+        f"<b>Xabar:</b> {safe_message_text}\n"
     )
     return post
 
