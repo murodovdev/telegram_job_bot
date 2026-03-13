@@ -164,10 +164,11 @@ def init_db() -> None:
 
     logger.info("[DB] Schema initialised at %s", DATABASE_PATH)
 
-    # Prune expired content_hashes on every startup. This keeps the table
-    # lean and ensures the fuzzy comparison only runs against recent rows.
+    # Startup maintenance: prune all tables that would grow forever.
     from bot.config import DEDUP_WINDOW_HOURS
     cleanup_content_hashes(DEDUP_WINDOW_HOURS)
+    cleanup_processed_msgs(keep_days=30)
+    cleanup_original_msg_index(keep_days=7)
 
     # Warm the in-memory caches immediately so the first message after
     # startup does not pay the cold-cache DB round-trip penalty.
@@ -194,6 +195,10 @@ def init_db() -> None:
 _source_group_ids_by_account: dict = {}  # {account_num: frozenset(chat_ids)}
 _blocked_user_ids: frozenset = frozenset()
 _cached_target_id: Optional[int] = None
+# Separate flag so is_blocked_cached() does not re-query the DB on every
+# message when the blocked list is legitimately empty (frozenset() is falsy,
+# so "if not _blocked_user_ids" would always be True in that case).
+_blocked_cache_ready: bool = False
 
 
 def _cache_refresh_source_groups() -> None:
@@ -214,10 +219,11 @@ def _cache_refresh_source_groups() -> None:
 
 def _cache_refresh_blocked_users() -> None:
     """Rebuild the blocked-user ID cache from the database."""
-    global _blocked_user_ids
+    global _blocked_user_ids, _blocked_cache_ready
     with _connection() as conn:
         rows = conn.execute("SELECT user_id FROM blocked_users").fetchall()
     _blocked_user_ids = frozenset(r["user_id"] for r in rows)
+    _blocked_cache_ready = True
     logger.debug("[DB] blocked-user cache refreshed: %d entries", len(_blocked_user_ids))
 
 
@@ -248,9 +254,10 @@ def get_source_group_ids_cached(account: Optional[int] = None) -> frozenset:
 
 
 def is_blocked_cached(user_id: int) -> bool:
-    """O(1) hot-path read from the in-memory blocked-user set."""
-    if not _blocked_user_ids and user_id:
-        # Cache might be cold if called before init_db — rare, handle gracefully
+    """O(1) hot-path read from the in-memory blocked-user set.
+    Uses _blocked_cache_ready flag instead of truthiness so an empty
+    blocked list does not cause a DB round-trip on every message."""
+    if not _blocked_cache_ready:
         _cache_refresh_blocked_users()
     return user_id in _blocked_user_ids
 
@@ -516,14 +523,18 @@ from difflib import SequenceMatcher
 
 
 def _normalise_text(text: str) -> str:
-    """
+    r"""
     Produce a canonical form of text for duplicate comparison.
 
     Steps:
-    1. Unicode NFC normalisation (合 == 合, different byte sequences → same)
+    1. Unicode NFC normalisation (same character, different byte sequences)
     2. Lowercase
     3. Strip URLs (they vary but content is the same)
-    4. Strip phone number patterns (same ad, different contact number)
+    4. Strip phone number patterns — ONLY clear phone formats:
+         +82-010-1234-5678, 010 1234 5678, (010)12345678 etc.
+       The old regex [\d\s\-\+\(\)]{7,} was too broad — it also ate
+       sentences like "5 nafar. Ish vaqti 08:00-17:00", turning different
+       job posts into the same normalised string (false positives).
     5. Collapse all whitespace to single spaces
     6. Strip leading/trailing whitespace
     """
@@ -533,15 +544,19 @@ def _normalise_text(text: str) -> str:
     text = text.lower()
     # Remove URLs
     text = re.sub(r"https?://\S+|www\.\S+", "", text)
-    # Remove phone-like patterns: strings of digits, dashes, spaces, parens ≥ 7 chars
-    text = re.sub(r"[\d\s\-\+\(\)]{7,}", " ", text)
+    # Remove phone numbers: optional + or country code, then groups of digits
+    # separated by spaces/dashes/dots, total digit count >= 7.
+    # Uses a tighter pattern that requires an optional leading + or digits-only
+    # prefix so it does not eat arbitrary mixed digit-space text.
+    text = re.sub(r"\+?[\d]{1,3}[\s\-\.]?[\(\d][\d\s\-\.\(\)]{5,}\d", " ", text)
     # Collapse all whitespace (spaces, newlines, tabs) to a single space
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
 def _content_hash(text: str) -> str:
-    """SHA-256 hex digest of the normalised text."""
+    """SHA-256 hex digest of the normalised text. Public so monitor.py can
+    compute the hash cheaply before taking the _pending_hashes lock."""
     return hashlib.sha256(_normalise_text(text).encode("utf-8")).hexdigest()
 
 
@@ -645,6 +660,50 @@ def cleanup_content_hashes(window_hours: int = 24) -> int:
         deleted = cursor.rowcount
     if deleted:
         logger.info("[DB] Pruned %d expired content_hashes rows", deleted)
+    return deleted
+
+
+def cleanup_processed_msgs(keep_days: int = 30) -> int:
+    """
+    Delete processed_msgs rows older than keep_days.
+
+    Without cleanup this table grows forever — 42 monitored groups each
+    receiving ~100 messages/day = 4200 rows/day = 1.5M rows/year.
+    30 days is enough to prevent any realistic duplicate from slipping through.
+    Returns the number of rows deleted.
+    """
+    if keep_days <= 0:
+        return 0
+    with _connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM processed_msgs WHERE processed_at < datetime('now', ?)",
+            (f"-{keep_days} days",),
+        )
+        deleted = cursor.rowcount
+    if deleted:
+        logger.info("[DB] Pruned %d old processed_msgs rows (keep_days=%d)", deleted, keep_days)
+    return deleted
+
+
+def cleanup_original_msg_index(keep_days: int = 7) -> int:
+    """
+    Delete original_msg_index rows older than keep_days.
+
+    This table records forwarded-message origins to catch Telegram-native
+    reposts.  A 7-day window is more than enough — nobody reposts a job
+    listing a week later expecting it to match.
+    Returns the number of rows deleted.
+    """
+    if keep_days <= 0:
+        return 0
+    with _connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM original_msg_index WHERE seen_at < datetime('now', ?)",
+            (f"-{keep_days} days",),
+        )
+        deleted = cursor.rowcount
+    if deleted:
+        logger.info("[DB] Pruned %d old original_msg_index rows (keep_days=%d)", deleted, keep_days)
     return deleted
 
 

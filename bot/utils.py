@@ -80,41 +80,51 @@ def build_job_post(
     """
     Build the formatted job-post HTML string for the target group.
 
+    Template (Uzbek):
+        ⚠️ Yangi xabar ma'lumotlari:
+
+        Guruh: <group name>
+        Xabar egasi: <sender>
+        Xabar vaqti: <KST timestamp>
+
+        Xabar matni:
+        <message text>
+
     ALL user-supplied strings are passed through html.escape() so that
-    special characters (<, >, &, ", ') in group names, usernames, or
-    message bodies can never break the HTML parser or cause send failures.
+    special characters in group names, usernames, or message bodies
+    can never break the HTML parser or cause send failures.
     """
     # Convert to Korea Standard Time (UTC+9) before formatting
     if message_time.tzinfo is None:
         message_time = message_time.replace(tzinfo=timezone.utc)
     kst_time = message_time.astimezone(KST)
-    time_str = kst_time.strftime("%Y-%m-%d %H:%M:%S")
+    time_str = kst_time.strftime("%Y-%m-%d %H:%M:%S (KST)")
 
-    # Escape all user-supplied content to prevent HTML parse errors
+    # Escape all user-supplied content
     safe_group_title  = html.escape(group_title)
     safe_author_name  = html.escape(author_name)
     safe_message_text = html.escape(message_text)
 
-    # Group name — clickable link if a URL is available, plain text otherwise
+    # Group name — clickable link if a public username is available
     if group_link:
         group_part = f'<a href="{html.escape(group_link)}">{safe_group_title}</a>'
     else:
         group_part = safe_group_title
 
-    # Message owner name — clickable link if a profile URL is available
+    # Sender — clickable link if a profile URL is available
     if author_link:
         owner_part = f'<a href="{html.escape(author_link)}">{safe_author_name}</a>'
     else:
         owner_part = safe_author_name
 
-    post = (
-        f"<b>⚠️ Yangi ish e’loni: </b>\n\n"
-        f"<b>Guruh:</b> {group_part}\n"
-        f"<b>Muallif:</b> {owner_part}\n"
-        f"<b>Vaqt:</b> {time_str}\n\n"
-        f"<b>Xabar matni:</b>\n{safe_message_text}"
+    return (
+        f"⚠️ <b>Yangi xabar ma'lumotlari:</b>\n\n"
+        f"Guruh: {group_part}\n"
+        f"Xabar egasi: {owner_part}\n"
+        f"Xabar vaqti: {time_str}\n\n"
+        f"Xabar matni:\n"
+        f"{safe_message_text}"
     )
-    return post
 
 
 # ── Telegram entity helpers ───────────────────────────────────────
@@ -174,9 +184,11 @@ async def safe_send_message(
     FloodWaitError — Telegram imposes a mandatory wait and tells us exactly
         how many seconds to wait. We must respect that number exactly.
         Retrying before the wait expires always fails again and wastes the
-        retry budget. This was the root cause of 5-minute forwarding delays:
-        the old code retried after 5s while Telegram required 180s, so all
-        three attempts failed and the message was dropped.
+        retry budget. FloodWait does NOT consume a retry attempt — after
+        sleeping the required time we try again on top of the normal budget.
+        (The old loop-based approach counted FloodWait as a failed attempt,
+        so if it hit on attempt 3 we would sleep correctly but then exit the
+        loop and return False without actually retrying.)
 
     All other errors — network hiccups, temporary server errors, etc.
         Use exponential back-off (5s, 10s) before retrying.
@@ -185,7 +197,9 @@ async def safe_send_message(
     """
     from telethon.errors import FloodWaitError
 
-    for attempt in range(1, MAX_RETRIES + 1):
+    attempt = 0
+    while attempt < MAX_RETRIES:
+        attempt += 1
         try:
             await client.send_message(
                 target,
@@ -198,14 +212,15 @@ async def safe_send_message(
         except FloodWaitError as e:
             # Telegram gave us the exact number of seconds we must wait.
             # Add a 5-second buffer so we don't immediately hit the limit again.
+            # Crucially: do NOT increment attempt — the wait was forced by
+            # Telegram, not a failure on our part. We will retry after sleeping.
             wait = e.seconds + 5
             logger.warning(
-                "[utils] ⏳ FloodWait %ds on attempt %d/%d — sleeping exactly %ds",
+                "[utils] ⏳ FloodWait %ds (attempt %d/%d) — sleeping %ds then retrying",
                 e.seconds, attempt, MAX_RETRIES, wait,
             )
             await asyncio.sleep(wait)
-            # After a FloodWait we retry immediately (don't count it as a
-            # failed attempt in the same way — the wait was forced by Telegram).
+            attempt -= 1  # undo the increment — FloodWait does not count
 
         except Exception as exc:
             logger.warning(
