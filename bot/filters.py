@@ -65,9 +65,7 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
         "hamkor kerak",
         "yordamchi kerak",
         "vakansiya",
-        "arbayt",      
-        "arbait",
-        "tekpe",    
+        "arbayt bor",
         "иш бор",
         "иш бор эди",
         "ишчи керак",
@@ -93,15 +91,9 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
         "ҳамкор керак",
         "ёрдамчи керак",
         "вакансия",
-        "арбайт",
-        "текпе",
-        "F6",
-        "F5",
-        "F4",
-        "F2",
+        "арбайт бор", 
         "D2 oladi",
-        "d2 mumkin",
-        
+        "d2 mumkin", 
         ],
 
     # ── Russian ────────────────────────────────────────────────────
@@ -123,7 +115,7 @@ STRONG_KEYWORDS: dict[str, list[str]] = {
         "нужны люди на работу",
         "трудоустройство",
         "на работу срочно",
-        "арбайт",
+        "арбайт есть",
         "зарплата от",
     ],
 
