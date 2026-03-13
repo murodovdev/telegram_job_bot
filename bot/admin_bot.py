@@ -151,21 +151,37 @@ async def _resolve_group(input_str: str) -> tuple:
 
     Resolution strategy:
     1. Try client_1 (primary account).
-    2. If client_1 fails (e.g. banned from the group), try client_2.
-    3. If both fail but the input is a numeric ID, accept it as-is with a
-       generic title — this lets you add groups that neither account can
-       currently resolve (e.g. private groups not yet joined).
-    4. Only hard-fail for @username inputs that no client can resolve.
+    2. If client_1 fails, try client_2.
+    3. If both fail but the input is a numeric ID, accept it as-is.
+       Only hard-fail for @username inputs that no client can resolve.
+
+    Key detail: Telethon's get_entity() treats a *string* of digits as a
+    username lookup (which always fails for channel IDs). Numeric inputs must
+    be passed as an *integer* in the -100XXXXXXXX supergroup format so Telethon
+    resolves them against the account's channel peer cache instead.
     """
     from telethon.tl.types import Channel as _Channel
 
     is_numeric = input_str.lstrip("-").isdigit()
 
+    # Pre-compute the correct integer peer for numeric inputs so both
+    # _try_client calls and the fallback all use the same normalised value.
+    if is_numeric:
+        raw = int(input_str.lstrip("-"))
+        _numeric_peer = int(f"-100{raw}") if int(input_str) >= 0 else int(input_str)
+    else:
+        _numeric_peer = None
+
     async def _try_client(client) -> tuple:
         if client is None or not client.is_connected():
             return None, None, None
         try:
-            entity   = await client.get_entity(input_str)
+            # IMPORTANT: pass integer for numeric IDs, not the raw string.
+            # Passing a digit string makes Telethon do a username lookup,
+            # which fails even when the account is a member of the channel.
+            # Passing the -100-prefixed integer hits the channel peer cache.
+            lookup = _numeric_peer if is_numeric else input_str
+            entity   = await client.get_entity(lookup)
             chat_id  = int(f"-100{entity.id}") if isinstance(entity, _Channel) else entity.id
             title    = getattr(entity, "title", None) or str(chat_id)
             username = getattr(entity, "username", None)
@@ -185,18 +201,17 @@ async def _resolve_group(input_str: str) -> tuple:
     if chat_id is not None:
         return chat_id, title, username
 
-    # Both clients failed — for numeric IDs accept the raw value.
-    # Normalize positive numbers to the -100 supergroup format because
-    # Telegram always delivers group events with that prefix. Without this,
-    # the stored chat_id never matches incoming events.
+    # Both clients failed.
+    # For numeric IDs we accept the normalised -100 value as-is. This handles
+    # the case where neither account has joined the group yet — the admin can
+    # add the ID now and join the account later.
     if is_numeric:
-        cid = int(input_str)
-        if cid > 0:
-            cid = int(f"-100{cid}")
         logger.warning(
-            "[admin_bot] Neither client resolved %s — accepting numeric ID as-is", cid
+            "[admin_bot] Neither client resolved %s — storing as %s (unverified). "
+            "Make sure the monitor account joins this group.",
+            input_str, _numeric_peer,
         )
-        return cid, f"Group {cid}", None
+        return _numeric_peer, f"Group {_numeric_peer}", None
 
     # @username that no client could resolve — hard fail
     return (

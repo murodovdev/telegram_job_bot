@@ -309,6 +309,21 @@ async def setup_monitor() -> None:
             account_num, len(groups),
         )
 
+        # ── Startup validation: catch bad IDs before they silently fail ──
+        # Any group with a positive chat_id is missing the -100 supergroup
+        # prefix. Telegram delivers events as -100XXXXXXXXX, so a positive
+        # stored ID never matches and monitoring silently does nothing.
+        bad_ids = [g for g in groups if g.chat_id > 0]
+        if bad_ids:
+            logger.error(
+                "[monitor] ⚠️  Account %s has %d group(s) with INVALID positive "
+                "chat_id — these will never match incoming events! "
+                "Run fix_chat_ids.py to repair them. Affected: %s",
+                account_num,
+                len(bad_ids),
+                [(g.chat_id, g.title) for g in bad_ids],
+            )
+
     # Chat-action handler only on client_1
     client_1.add_event_handler(_on_chat_action, events.ChatAction())
 
