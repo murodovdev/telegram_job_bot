@@ -77,7 +77,10 @@ def _make_message_handler(assigned_client, account_num: int):
         )
 
         # ── 1. Source-group gate (account-specific) ───────────────
-        if chat_id not in db.get_source_group_ids(account=account_num):
+        # Uses the in-memory cache — O(1) frozenset lookup, no DB I/O,
+        # no event-loop blocking. Called on every incoming message so
+        # this is the single most performance-critical line in the bot.
+        if chat_id not in db.get_source_group_ids_cached(account=account_num):
             logger.debug(
                 "[monitor/acct%s] IGNORED (not a source group) | chat_id=%s | msg_id=%s",
                 account_num, chat_id, msg_id,
@@ -99,10 +102,9 @@ def _make_message_handler(assigned_client, account_num: int):
             return
 
         # ── 2.5 Blocked-user gate ─────────────────────────────────
-        # message.sender_id is a plain integer available with zero cost —
-        # no Telegram API call needed. Check before repost/dedup lookups.
+        # Uses in-memory cache — O(1) frozenset lookup, no DB I/O.
         sender_id = message.sender_id
-        if sender_id and db.is_blocked(sender_id):
+        if sender_id and db.is_blocked_cached(sender_id):
             logger.info(
                 "[monitor/acct%s] SKIPPED (blocked user) | user_id=%s | chat_id=%s | msg_id=%s",
                 account_num, sender_id, chat_id, msg_id,
@@ -193,17 +195,31 @@ def _make_message_handler(assigned_client, account_num: int):
         )
 
         # ── 6. Resolve entities ───────────────────────────────────
-        chat = sender = None
+        # Use the title/username already stored in the DB first — this avoids
+        # a live Telegram API call for the chat entity, which costs 100–2000ms
+        # whenever the entity is not already in Telethon's local cache.
+        # Only fall back to event.get_chat() if the DB has no record.
+        stored_group = db.get_source_group_by_id(chat_id)
+        group_title  = stored_group.title    if stored_group else None
+        group_link   = (
+            f"https://t.me/{stored_group.username}"
+            if stored_group and stored_group.username else None
+        )
+
+        sender = None
         try:
-            chat   = await event.get_chat()
+            if not group_title:
+                # Not in DB yet — resolve from Telegram (rare path)
+                chat        = await event.get_chat()
+                group_title = get_chat_display_name(chat)
+                group_link  = get_chat_link(chat)
             sender = await event.get_sender()
         except Exception as exc:
             logger.warning(
                 "[monitor/acct%s] Could not resolve entities: %s", account_num, exc
             )
 
-        group_title = get_chat_display_name(chat)
-        group_link  = get_chat_link(chat)
+        group_title = group_title or "Unknown Group"
         author_name = get_sender_display_name(sender)
         author_link: Optional[str] = (
             get_user_link(sender) if isinstance(sender, User) else None
@@ -217,7 +233,8 @@ def _make_message_handler(assigned_client, account_num: int):
             msg_time = utcnow()
 
         # ── 8. Resolve target ─────────────────────────────────────
-        target = _get_target_id()
+        # Uses in-memory cache — no DB I/O on the hot path.
+        target = db.get_cached_target_id()
         if not target:
             await notify_admin(
                 "❌ <b>Monitor error:</b> No target group configured.\n"
