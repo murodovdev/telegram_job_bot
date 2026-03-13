@@ -1,731 +1,471 @@
-<<<<<<< HEAD:README
-# 🇰🇷 Korea Ish E'lonlari — Telegram Job Aggregator Bot
+# Korea Ish E'lonlari — Telegram Job Aggregator Bot
 
-A production-ready Telegram userbot that automatically collects job announcements from multiple Uzbek community groups in South Korea and reposts them into a single public channel: **Korea Ish E'lonlari**.
+A production-grade Telegram userbot that monitors multiple Uzbek job-related
+groups in South Korea and automatically forwards matching job posts to the
+**Korea Ish E'lonlari** target group. Built with Telethon (userbot) and
+aiogram (admin panel), deployed on Railway with a persistent SQLite database.
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
-- [How It Works](#how-it-works)
+- [Overview](#overview)
 - [Features](#features)
+- [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Requirements](#requirements)
-- [Setup Guide](#setup-guide)
-- [Running the Bot](#running-the-bot)
+- [Environment Variables](#environment-variables)
+- [Local Setup](#local-setup)
+- [Generating a Session String](#generating-a-session-string)
+- [Railway Deployment](#railway-deployment)
 - [Admin Bot Commands](#admin-bot-commands)
-- [Message Format](#message-format)
-- [Keyword Detection](#keyword-detection)
-- [Running as a Service](#running-as-a-service-linux)
-- [FAQ & Troubleshooting](#faq--troubleshooting)
+- [Message Forwarding Pipeline](#message-forwarding-pipeline)
+- [Keyword Filter](#keyword-filter)
+- [Duplicate Detection](#duplicate-detection)
+- [Database Schema](#database-schema)
+- [Utility Scripts](#utility-scripts)
+- [Tuning & Configuration](#tuning--configuration)
+- [Known Limitations](#known-limitations)
 
 ---
 
-## How It Works
+## Overview
+
+Uzbek workers in South Korea share job listings across dozens of Telegram
+groups. This bot monitors all of them simultaneously using up to two personal
+Telegram accounts (Telethon userbots), filters messages using a multilingual
+keyword engine (Uzbek / Russian / Korean), and forwards confirmed job posts
+to a single aggregator group in a clean, consistent format.
+
+Forwarded posts look like this:
 
 ```
-┌──────────────────────────────────────────────────┐
-│         YOUR PERSONAL TELEGRAM ACCOUNT           │
-│            (Telethon Userbot Session)            │
-└─────────────────────┬────────────────────────────┘
-                      │ listens to new messages
-        ┌─────────────▼──────────────┐
-        │      42+ Source Groups     │
-        │  (Uzbek groups in Korea)   │
-        └─────────────┬──────────────┘
-                      │
-        ┌─────────────▼──────────────┐
-        │         monitor.py         │
-        │  1. Repost duplicate check │
-        │  2. Two-tier keyword filter│
-        │  3. Format message (KST)   │
-        └─────────────┬──────────────┘
-                      │ forwards
-        ┌─────────────▼──────────────┐
-        │   Korea Ish E'lonlari      │
-        │     (Target Group)         │
-        └────────────────────────────┘
+⚠️ Yangi xabar ma'lumotlari:
 
-        ┌────────────────────────────┐
-        │     Admin Bot (aiogram)    │
-        │  Manage groups, view stats │
-        │  Test keywords, get alerts │
-        └────────────────────────────┘
+Guruh: Korea Ishchilar Guruhi
+Xabar egasi: Akbar Toshmatov
+Xabar vaqti: 2026-03-13 10:15:00 (KST)
+
+Xabar matni:
+Zavod ishchilari kerak! Ish haqi yaxshi, ovqat beriladi.
 ```
 
 ---
 
 ## Features
 
-| # | Feature | Description |
-|---|---------|-------------|
-| 1 | **Personal account monitoring** | Uses Telethon to read messages from groups where bots cannot enter |
-| 2 | **Two-tier keyword filter** | Tier 1: strong exact keywords. Tier 2: fuzzy word-combination matching for real-world messy writing |
-| 3 | **Repost deduplication** | Same job post forwarded across multiple groups is only sent once |
-| 4 | **KST timestamps** | All message times displayed in Korea Standard Time (UTC+9) |
-| 5 | **Auto-delete join/leave messages** | Keeps the target group clean automatically |
-| 6 | **No link preview cards** | "VIEW GROUP" / "VIEW USER" cards are suppressed |
-| 7 | **Admin control panel** | Full Telegram bot UI to manage everything without touching code |
-| 8 | **Group membership verification** | Warns you if the monitor account hasn't joined a newly added group |
-| 9 | **Keyword tester** | Paste any message to see if the filter would catch it and why |
-| 10 | **Analytics & stats** | 7-day statistics: top groups, language breakdown, detection method |
-| 11 | **Error notifications** | Instant DM to admin if a message fails to send |
-| 12 | **Daily summary at 9pm KST** | Automated evening report with today's forwarding stats |
-| 13 | **SQLite database** | Lightweight persistent storage — no external database needed |
+- **Dual-account monitoring** — two Telethon userbot accounts run concurrently;
+  each group is assigned to one account, so groups where one account is banned
+  are still monitored by the other
+- **Multilingual keyword engine** — detects job posts in Uzbek, Russian, and
+  Korean using a curated phrase list with fuzzy separator handling
+- **Three-tier duplicate prevention:**
+  - Telegram-native forward deduplication (`fwd_from` header check)
+  - Per-message ID deduplication (`chat_id + message_id`)
+  - Content fingerprinting — SHA-256 exact hash + `SequenceMatcher` fuzzy
+    similarity, catches copy-paste spam across multiple groups
+- **In-memory hot-path cache** — source group IDs, blocked user IDs, and
+  target group ID are held in Python frozensets; Gate 1 and Gate 2.5 are O(1)
+  lookups with no database I/O, no event-loop blocking
+- **FloodWait-aware sending** — respects Telegram's exact flood-wait duration
+  instead of retrying blindly
+- **Admin bot (aiogram v3)** — full control panel with FSM-based flows for
+  adding/removing groups, setting the target, blocking users, viewing stats
+- **Persistent storage on Railway** — SQLite database on a mounted volume,
+  survives all redeployments
+- **Daily summary** — scheduled 9 PM KST digest sent to admin via DM
+- **Auto-delete service messages** — join/leave notifications in the target
+  group are deleted automatically
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                        main.py                          │
+│  asyncio.gather(client_1, client_2) + admin + scheduler │
+└────────┬───────────────────┬────────────────────────────┘
+         │                   │
+         ▼                   ▼
+  Telethon client_1    Telethon client_2        aiogram Bot
+  (Account 1)          (Account 2, optional)    (Admin panel)
+         │                   │                       │
+         ▼                   ▼                       ▼
+   NewMessage handler   NewMessage handler     FSM command handlers
+   (groups: acct=1)     (groups: acct=2)       /addgroup /blockuser …
+         │                   │                       │
+         └─────────┬─────────┘                       │
+                   ▼                                 ▼
+           Forwarding pipeline              SQLite (job_bot.db)
+           (9-gate filter chain)            ├── source_groups
+                   │                        ├── target_group
+                   ▼                        ├── processed_msgs
+           Target group send                ├── content_hashes
+           (Korea Ish E'lonlari)            ├── forwarded_stats
+                                            ├── original_msg_index
+                                            └── blocked_users
+```
+
+Both Telethon clients and the aiogram admin bot run in a single process under
+one asyncio event loop. The database is SQLite in WAL mode for concurrent
+read performance.
 
 ---
 
 ## Project Structure
 
 ```
-telegram_job_bot/
-│
-├── bot/
-│   ├── __init__.py       # Package marker
-│   ├── admin_bot.py      # aiogram admin control panel bot
-│   ├── client.py         # Shared Telethon client singleton
-│   ├── config.py         # Environment variable loader
-│   ├── database.py       # SQLite: groups, stats, dedup tables
-│   ├── filters.py        # Two-tier keyword detection engine
-│   ├── monitor.py        # Telethon userbot: listens & forwards
-│   ├── notifier.py       # Admin error notification system
-│   ├── scheduler.py      # Daily 9pm KST summary scheduler
-│   └── utils.py          # Logging, HTML formatting, helpers
-│
-├── data/                 # Auto-created — SQLite database file
-├── logs/                 # Auto-created — job_bot.log
-├── sessions/             # Auto-created — Telethon session file
-│
-├── main.py               # ⭐ Unified entry point (recommended)
-├── main_monitor.py       # Standalone monitor only
-├── main_admin.py         # Standalone admin bot only
+.
+├── main.py                  # Unified entry point — runs everything
+├── main_monitor.py          # Standalone monitor only
+├── main_admin.py            # Standalone admin bot only
+├── generate_session.py      # Interactive session string generator
+├── fix_chat_ids.py          # One-time DB migration for bad chat IDs
+├── railway.toml             # Railway deployment config
 ├── requirements.txt
-├── .env.example
-├── .gitignore
-└── README.md
+└── bot/
+    ├── config.py            # Environment variable loader
+    ├── client.py            # Telethon client instances
+    ├── database.py          # SQLite layer + in-memory cache
+    ├── filters.py           # Multilingual keyword engine
+    ├── monitor.py           # NewMessage handler factory (dual-account)
+    ├── admin_bot.py         # aiogram v3 admin panel + FSM flows
+    ├── notifier.py          # Admin DM error notifications
+    ├── scheduler.py         # Daily 9 PM KST summary
+    └── utils.py             # Logging, message formatter, safe_send_message
 ```
 
 ---
 
 ## Requirements
 
-- **Python 3.11 or higher**
-- A personal Telegram account
-- Telegram API credentials (free)
-- A Telegram Bot token (free, from @BotFather)
+- Python 3.11+
+- A Telegram account (two recommended) with API credentials from
+  [my.telegram.org](https://my.telegram.org)
+- A Telegram bot token from [@BotFather](https://t.me/BotFather) for the
+  admin panel
+- Railway account (for cloud deployment) or any Linux VPS
 
----
-
-## Setup Guide
-
-### Step 1 — Get Telegram API credentials
-
-1. Go to **https://my.telegram.org/apps**
-2. Log in with your phone number
-3. Click **Create application**
-4. Copy your `api_id` and `api_hash`
-
-### Step 2 — Create an Admin Bot
-
-1. Open Telegram and message **@BotFather**
-2. Send `/newbot` and follow the prompts
-3. Copy the **bot token** (looks like `123456789:ABCdef...`)
-
-### Step 3 — Get your Telegram User ID
-
-1. Message **@userinfobot** on Telegram
-2. It replies with your numeric ID (e.g. `123456789`)
-
-### Step 4 — Install Python dependencies
+Install dependencies:
 
 ```bash
-# Create a virtual environment (recommended)
-python -m venv venv
-
-# Activate it
-source venv/bin/activate        # Linux / macOS
-venv\Scripts\activate           # Windows
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Step 5 — Configure environment variables
+---
 
-```bash
-cp .env.example .env
-```
+## Environment Variables
 
-Open `.env` and fill in every value:
+Copy `.env.example` to `.env` and fill in all values.
 
-```env
-API_ID=12345678
-API_HASH=your_api_hash_here
-PHONE_NUMBER=+998901234567
-BOT_TOKEN=123456789:ABCdef...
-ADMIN_USER_ID=987654321
-TARGET_GROUP=KoreaIshElonlari
-```
+### Required
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `API_ID` | Telegram API app ID | `12345678` |
-| `API_HASH` | Telegram API app hash | `abc123def456...` |
-| `PHONE_NUMBER` | Your account phone number | `+998901234567` |
-| `BOT_TOKEN` | Admin bot token from @BotFather | `123:ABC...` |
-| `ADMIN_USER_ID` | Your Telegram numeric user ID | `987654321` |
-| `TARGET_GROUP` | Output group username or numeric ID | `KoreaIshElonlari` |
+| Variable | Description |
+|---|---|
+| `API_ID` | Telegram API ID from my.telegram.org |
+| `API_HASH` | Telegram API hash from my.telegram.org |
+| `PHONE_NUMBER` | Phone number for Account 1 (e.g. `+821012345678`) |
+| `BOT_TOKEN` | Admin bot token from @BotFather |
+| `ADMIN_USER_ID` | Your Telegram user ID (integer) |
+
+### Account 1 session (choose one)
+
+| Variable | Description |
+|---|---|
+| `SESSION_STRING` | Base64 string session — **recommended for Railway** |
+| `SESSION_NAME` | Local session file path (default: `sessions/userbot`) |
+
+### Account 2 (optional)
+
+| Variable | Description |
+|---|---|
+| `PHONE_NUMBER_2` | Phone number for Account 2 |
+| `SESSION_STRING_2` | String session for Account 2 |
+| `SESSION_NAME_2` | Local session file path for Account 2 |
+
+### Optional
+
+| Variable | Default | Description |
+|---|---|---|
+| `TARGET_GROUP` | — | Target group ID (can also be set via admin bot) |
+| `DATABASE_PATH` | `data/job_bot.db` | Path to SQLite database file |
+| `LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`) |
+| `DEDUP_WINDOW_HOURS` | `24` | Hours to remember forwarded posts for dedup |
+| `DEDUP_SIMILARITY_THRESHOLD` | `0.85` | Fuzzy match threshold (0.0–1.0) |
+
+> **Railway auto-detection:** If `RAILWAY_ENVIRONMENT` is set (Railway injects
+> this automatically), `DATABASE_PATH` defaults to `/data/job_bot.db` so that
+> attaching a Volume at `/data` is sufficient — no extra variable needed.
 
 ---
 
-## Running the Bot
-
-### ⭐ Recommended — run everything together
+## Local Setup
 
 ```bash
+# 1. Clone the repository
+git clone https://github.com/your-username/korea-ish-elonlari-bot.git
+cd korea-ish-elonlari-bot
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Configure environment
+cp .env.example .env
+# Edit .env and fill in all required values
+
+# 4. Generate a session string (first time only)
+python generate_session.py --acct 1 --qr
+
+# 5. Run the bot
 python main.py
 ```
 
-This starts the monitor, admin bot, and daily scheduler in one process. On first run, Telegram will send a verification code to your phone — enter it in the terminal.
+---
 
-### Alternative — run separately (two terminals)
+## Generating a Session String
+
+A session string lets the bot log in to your Telegram account without storing
+a local session file — essential for cloud deployment on Railway.
 
 ```bash
-# Terminal 1: monitor
-python main_monitor.py
+# QR code login (recommended — no SMS needed)
+python generate_session.py --acct 1 --qr
+python generate_session.py --acct 2 --qr
 
-# Terminal 2: admin bot
-python main_admin.py
+# Phone number login (fallback)
+python generate_session.py --acct 1 --phone
+
+# Interactive menu
+python generate_session.py
 ```
 
-> ⚠️ When running separately, `@username` group resolution and the `🧪 Test Send` feature require both processes to be running together via `main.py`.
+The script prints `SESSION_STRING=<value>` when complete. Copy the value into
+your `.env` file or Railway Variables.
+
+> **QR login:** Open Telegram on your phone → Settings → Devices →
+> Link Desktop Device → scan the QR code shown in the terminal.
+
+---
+
+## Railway Deployment
+
+### 1. Push your code
+
+```bash
+git add .
+git commit -m "Initial deploy"
+git push
+```
+
+Railway detects the push and builds automatically using Nixpacks.
+
+### 2. Set environment variables
+
+In Railway dashboard → your service → **Variables** tab, add all required
+variables from the [Environment Variables](#environment-variables) section.
+
+### 3. Attach a persistent volume (critical)
+
+Railway containers have an ephemeral filesystem — without a volume, your
+database is deleted on every redeploy.
+
+1. Railway dashboard → your service → **Volumes** tab
+2. Click **New Volume**
+3. Set Mount Path: `/data`
+4. Add variable: `DATABASE_PATH = /data/job_bot.db`
+
+Your database now survives all future deployments permanently.
+
+### 4. Fix legacy group IDs (first deploy only)
+
+If you previously added groups by numeric ID before the ID-fix patch, run the
+migration script once via the Railway shell:
+
+```bash
+python fix_chat_ids.py
+```
 
 ---
 
 ## Admin Bot Commands
 
-Open Telegram and message your admin bot. All commands are also available as keyboard buttons.
+Open a chat with your bot and use the keyboard or these commands:
 
-| Button / Command | Description |
-|-----------------|-------------|
-| 📋 List Groups / `/listgroups` | Show all monitored source groups with ID, link, and date added |
-| ➕ Add Group / `/addgroup` | Add a group by numeric ID or @username. Automatically resolves the real group name and checks membership |
-| ➖ Remove Group / `/removegroup` | Tap-to-remove inline keyboard — no typing required |
-| 🎯 Set Target / `/settarget` | Set the destination group where job posts are forwarded |
-| 🔍 Test Keyword / `/testkeyword` | Paste any message text to see if the filter detects it as a job post |
-| 📈 Stats / `/stats` | 7-day analytics: total forwarded, top source groups, language breakdown |
-| 🧪 Test Send / `/test` | Send a test message to the target group to verify connectivity |
-| 📊 Status / `/status` | Current monitor status, group list, and total messages forwarded |
+| Button | Action |
+|---|---|
+| 📋 List Groups | Show all monitored source groups |
+| ➕ Add Group | Add a group by @username or numeric ID |
+| ➖ Remove Group | Remove a monitored group |
+| 🎯 Set Target | Set the forwarding destination group |
+| 📊 Status | Show connection status for all accounts |
+| 🧪 Test Send | Send a test message to the target group |
+| 📈 Stats | Today's forwarding statistics |
+| 🔍 Test Keyword | Test whether a text would be detected as a job post |
+| 🔎 Check Groups | Verify account membership in all monitored groups |
+| 🚫 Blocked Users | View, add, or remove user blocks |
 
-### How to get a group's numeric ID
-
-Forward any message from that group to **@userinfobot** — it will reply with the group's numeric ID (e.g. `-1001234567890`).
-
----
-
-## Message Format
-
-Every forwarded job post looks like this in the target group:
-
-```
-⚠️ New Message Information:
-
-Group: xxxx          ← clickable, opens the group
-Message Owner: xxxx              ← clickable, opens their profile
-Message Time: 2026-03-06 13:47:38 (KST)
-
-Message Text:
-xxxx
-```
-
-- Group name and author name are **clickable hyperlinks**
-- Time is always in **Korea Standard Time (KST)**
-- No "VIEW GROUP" preview cards
-- Join/leave service messages in the target group are **automatically deleted**
+When adding a group, if Account 2 is configured you will be asked which
+account should monitor it.
 
 ---
 
-## Keyword Detection
+## Message Forwarding Pipeline
 
-The filter uses a **two-tier system**:
+Every incoming message passes through 9 gates in sequence. It is dropped at
+the first gate it fails.
 
-### Tier 1 — Strong keywords (single match = job post)
+```
+Gate 1    Source-group check     Is this chat_id in the monitored list?
+                                 (O(1) in-memory frozenset — no DB I/O)
+Gate 2    Text extraction        Does the message have text or a caption?
+Gate 2.5  Blocked-user check     Is the sender in the blocked list?
+                                 (O(1) in-memory set — no DB I/O)
+Gate 3    Forward dedup          Is this a Telegram-native forward of an
+                                 already-processed message?
+Gate 4    Message ID dedup       Have we seen this (chat_id, message_id)?
+Gate 5    Keyword filter         Does the text contain a job-signal keyword?
+Gate 5.5  Content dedup          Is this text a near-duplicate of a recently
+                                 forwarded post?
+Gate 6    Entity resolution      Resolve group title/link and sender name
+Gate 7    Timestamp              Normalise to UTC, fall back to utcnow()
+Gate 8    Target lookup          Get target group ID from in-memory cache
+Gate 9    Build and send         Format the post and send
+```
+
+The content hash is registered only after a successful send. A failed send
+never permanently blacklists content.
+
+---
+
+## Keyword Filter
+
+`bot/filters.py` uses a curated list of strong, unambiguous job-signal phrases
+in three languages. A single match is enough to classify a message as a job
+post.
+
+**Languages:** Uzbek, Russian, Korean
+
+**Example phrases:**
 
 | Language | Examples |
-|----------|---------|
-| 🇺🇿 Uzbek | `ish bor`, `ishchi kerak`, `vakansiya`, `arbayt`, `tekpe`, `ish haqi`, `ishga olinadi` |
-| 🇷🇺 Russian | `вакансия`, `нужен работник`, `подработка`, `трудоустройство` |
-| 🇰🇷 Korean | `알바`, `구인`, `채용`, `시급`, `월급`, `구합니다` |
+|---|---|
+| Uzbek | `ish bor`, `ishchi kerak`, `vakansiya`, `maosh`, `arbayt`, `ish haqi` |
+| Russian | `вакансия`, `нужен работник`, `подработка`, `зарплата от` |
+| Korean | `구인`, `채용`, `모집`, `시급`, `알바`, `사람 구해요` |
 
-### Tier 2 — Word combinations (both words must appear anywhere in the message)
+Text is normalised before matching: lowercased, separators (`-_./`) replaced
+with spaces, emoji and punctuation stripped. Korean uses substring matching;
+Uzbek and Russian use word-boundary matching.
 
-| Combo | Example message caught |
-|-------|----------------------|
-| `kerak` + person word | `"1 yigit kerak bugun zavod"` |
-| `ish` + location word | `"zavod uchun ish bor"` |
-| `работа` + context word | `"срочно работа есть склад"` |
-
-### Testing keywords
-
-Use the **🔍 Test Keyword** button in the admin bot — paste any message and get instant feedback showing which tier matched, which keywords triggered, and a confidence score.
+To add a new keyword, add the phrase to `STRONG_KEYWORDS` in `filters.py` and
+restart the bot.
 
 ---
 
-## Running as a Service (Linux)
+## Duplicate Detection
 
-To keep the bot running after you close the terminal, create a systemd service:
+Three independent layers prevent the same job listing from appearing more than
+once in the target group.
 
-**`/etc/systemd/system/korea-ish-bot.service`**
+**Layer 1 — Telegram forward header (Gate 3)**
+If a user presses Telegram's Forward button, the message carries a `fwd_from`
+header. If that original was already forwarded, the copy is dropped.
 
-```ini
-[Unit]
-Description=Korea Ish Elonlari Bot
-After=network.target
+**Layer 2 — Message ID (Gate 4)**
+Each successfully forwarded `(chat_id, message_id)` is stored in
+`processed_msgs`. The same pair seen again is dropped.
 
-[Service]
-Type=simple
-User=youruser
-WorkingDirectory=/path/to/telegram_job_bot
-ExecStart=/path/to/venv/bin/python main.py
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
+**Layer 3 — Content fingerprinting (Gate 5.5)**
+Catches the most common real-world pattern: the same listing copied and pasted
+manually into multiple groups.
 
-[Install]
-WantedBy=multi-user.target
-```
+- *Tier 1 — Exact hash:* SHA-256 of normalised text (phone numbers and URLs
+  stripped). O(1) indexed DB lookup. Zero false positives.
+- *Tier 2 — Fuzzy match:* `difflib.SequenceMatcher` ratio against all texts
+  forwarded within the dedup window. Texts scoring above
+  `DEDUP_SIMILARITY_THRESHOLD` (default 0.85) are treated as duplicates.
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable korea-ish-bot
-sudo systemctl start korea-ish-bot
-sudo systemctl status korea-ish-bot
-
-# View live logs
-sudo journalctl -u korea-ish-bot -f
-```
+Old fingerprint rows are pruned on startup and nightly by the scheduler.
 
 ---
 
-## FAQ & Troubleshooting
+## Database Schema
 
-**Q: The bot starts but no messages are being forwarded.**
+```sql
+source_groups       -- monitored source chats
+  id, chat_id UNIQUE, title, username, added_at, assigned_account
 
-Check in order:
+target_group        -- forwarding destination (singleton, id = 1)
+  id, chat_id, title, username, updated_at
 
-1. Run `python main.py` and look for `✅ JOB DETECTED` in the logs
-2. If you only see `MSG RECEIVED` but no detection — the messages don't contain job keywords. Use 🔍 **Test Keyword** to verify
-3. If you see no `MSG RECEIVED` at all — the monitor account is not a member of the source groups
-4. Use 🧪 **Test Send** to confirm the target group connection works
+processed_msgs      -- per-message dedup index
+  PK(chat_id, message_id), processed_at
 
-**Q: I get `Bad Request: message is too long` in /listgroups.**
+forwarded_stats     -- historical forwarding records
+  id, source_chat_id, source_title, matched_lang,
+  matched_kw, match_tier, forwarded_at
 
-This is handled automatically — the list is paginated into chunks of ~3800 characters. If it still happens, restart the bot with the latest `admin_bot.py`.
+original_msg_index  -- Telegram-native forward origin registry
+  PK(fwd_chat_id, fwd_msg_id), seen_at
 
-**Q: Join/leave messages being deleted.**
+content_hashes      -- content fingerprints for cross-group dedup
+  id, text_hash, norm_text, source_chat, source_msg, seen_at
 
-The personal Telegram account running the monitor must be an **admin** in the target group with the **"Delete messages"** permission enabled.
-
-**Q: The same job post appears twice in the target group.**
-
-This is the repost deduplication feature. Make sure you are running the latest `monitor.py` — it checks the `fwd_from` header of forwarded messages.
-
-**Q: I want to add a keyword that isn't in the list.**
-
-Open `bot/filters.py` and add it to the appropriate list in `STRONG_KEYWORDS`. Restart `main.py` for the change to take effect.
-
-**Q: Can I run this on a VPS / cloud server?**
-
-Yes. The recommended setup is a Linux VPS running the systemd service above. Any cloud provider works (DigitalOcean, Hetzner, AWS, etc.). The bot uses very little CPU and RAM.
-
----
-
-## Security Notes
-
-- Never commit your `.env` file — it contains your personal Telegram credentials
-- The `sessions/` folder contains the Telethon session file — treat it like a password
-- The admin bot only responds to your `ADMIN_USER_ID` — all other users are rejected
-- Add `.env`, `sessions/`, `data/`, and `logs/` to `.gitignore` (already included)
-
----
-
-## Dependencies
-
-```
-telethon==1.36.0      # Telegram client (userbot)
-aiogram==3.13.0       # Telegram Bot API framework (admin bot)
-python-dotenv==1.0.1  # .env file loader
-aiohttp==3.10.10      # Async HTTP (used by aiogram)
+blocked_users       -- senders whose messages are never forwarded
+  user_id PK, full_name, username, reason, blocked_at
 ```
 
 ---
 
-*Built for the Uzbek community in South Korea 🇺🇿🇰🇷*#   t e l e g r a m _ j o b _ b o t 
- 
- 
-=======
-# 🇰🇷 Korea Ish E'lonlari — Telegram Job Aggregator Bot
+## Utility Scripts
 
-A production-ready Telegram userbot that automatically collects job announcements from multiple Uzbek community groups in South Korea and reposts them into a single public channel: **Korea Ish E'lonlari**.
+### `generate_session.py`
 
----
+Generates a Telethon string session for cloud deployment. Supports both QR
+code login and phone number login with automatic 2FA handling.
 
-## 📋 Table of Contents
+### `fix_chat_ids.py`
 
-- [How It Works](#how-it-works)
-- [Features](#features)
-- [Project Structure](#project-structure)
-- [Requirements](#requirements)
-- [Setup Guide](#setup-guide)
-- [Running the Bot](#running-the-bot)
-- [Admin Bot Commands](#admin-bot-commands)
-- [Message Format](#message-format)
-- [Keyword Detection](#keyword-detection)
-- [Running as a Service](#running-as-a-service-linux)
-- [FAQ & Troubleshooting](#faq--troubleshooting)
+One-time migration that corrects source groups stored with a positive
+`chat_id` (missing the mandatory `-100` supergroup prefix). Run once after the
+first deployment if groups were added with a version of the bot that had this
+bug.
 
 ---
 
-## How It Works
+## Tuning & Configuration
 
-```
-┌──────────────────────────────────────────────────┐
-│         YOUR PERSONAL TELEGRAM ACCOUNT           │
-│            (Telethon Userbot Session)            │
-└─────────────────────┬────────────────────────────┘
-                      │ listens to new messages
-        ┌─────────────▼──────────────┐
-        │      42+ Source Groups     │
-        │  (Uzbek groups in Korea)   │
-        └─────────────┬──────────────┘
-                      │
-        ┌─────────────▼──────────────┐
-        │         monitor.py         │
-        │  1. Repost duplicate check │
-        │  2. Two-tier keyword filter│
-        │  3. Format message (KST)   │
-        └─────────────┬──────────────┘
-                      │ forwards
-        ┌─────────────▼──────────────┐
-        │   Korea Ish E'lonlari      │
-        │     (Target Group)         │
-        └────────────────────────────┘
-
-        ┌────────────────────────────┐
-        │     Admin Bot (aiogram)    │
-        │  Manage groups, view stats │
-        │  Test keywords, get alerts │
-        └────────────────────────────┘
-```
+| Symptom | Fix |
+|---|---|
+| Too many unrelated posts forwarded | Remove loose keywords from `STRONG_KEYWORDS` |
+| Bot missing job posts in a specific pattern | Add the missing phrase to `STRONG_KEYWORDS` |
+| Duplicate posts still appear in target group | Lower `DEDUP_SIMILARITY_THRESHOLD` (e.g. `0.78`) |
+| Unique posts incorrectly blocked as duplicates | Raise `DEDUP_SIMILARITY_THRESHOLD` (e.g. `0.92`) |
+| Dedup window too short or too long | Adjust `DEDUP_WINDOW_HOURS` |
+| Too much log noise in Railway | Set `LOG_LEVEL=WARNING` |
+| Forwarding delays visible in logs | Check for `FloodWait` lines — bot handles these automatically |
 
 ---
 
-## Features
+## Known Limitations
 
-| # | Feature | Description |
-|---|---------|-------------|
-| 1 | **Personal account monitoring** | Uses Telethon to read messages from groups where bots cannot enter |
-| 2 | **Two-tier keyword filter** | Tier 1: strong exact keywords. Tier 2: fuzzy word-combination matching for real-world messy writing |
-| 3 | **Repost deduplication** | Same job post forwarded across multiple groups is only sent once |
-| 4 | **KST timestamps** | All message times displayed in Korea Standard Time (UTC+9) |
-| 5 | **Auto-delete join/leave messages** | Keeps the target group clean automatically |
-| 6 | **No link preview cards** | "VIEW GROUP" / "VIEW USER" cards are suppressed |
-| 7 | **Admin control panel** | Full Telegram bot UI to manage everything without touching code |
-| 8 | **Group membership verification** | Warns you if the monitor account hasn't joined a newly added group |
-| 9 | **Keyword tester** | Paste any message to see if the filter would catch it and why |
-| 10 | **Analytics & stats** | 7-day statistics: top groups, language breakdown, detection method |
-| 11 | **Error notifications** | Instant DM to admin if a message fails to send |
-| 12 | **Daily summary at 9pm KST** | Automated evening report with today's forwarding stats |
-| 13 | **SQLite database** | Lightweight persistent storage — no external database needed |
+- **No media forwarding.** Only text and captions are forwarded. Photos and
+  videos are not included by design, to keep the target group clean.
+- **Telethon userbot required.** The bot uses personal Telegram accounts, not
+  the Bot API. Both accounts must be members of all assigned source groups.
+- **Single-process SQLite.** Sufficient for this use case, but not suitable
+  for distributed or multi-process deployments. Migrate to PostgreSQL if
+  scaling horizontally.
+- **Session invalidation.** If Telegram logs out the account (too many
+  devices, suspicious activity flag), a new session string must be generated
+  and the `SESSION_STRING` variable updated in Railway.
+- **Rate limits.** Telegram limits how many messages a userbot can send per
+  minute. The bot handles `FloodWaitError` by sleeping the exact required
+  duration, but very high-volume bursts may still cause brief delays.
 
 ---
 
-## Project Structure
+## License
 
-```
-telegram_job_bot/
-│
-├── bot/
-│   ├── __init__.py       # Package marker
-│   ├── admin_bot.py      # aiogram admin control panel bot
-│   ├── client.py         # Shared Telethon client singleton
-│   ├── config.py         # Environment variable loader
-│   ├── database.py       # SQLite: groups, stats, dedup tables
-│   ├── filters.py        # Two-tier keyword detection engine
-│   ├── monitor.py        # Telethon userbot: listens & forwards
-│   ├── notifier.py       # Admin error notification system
-│   ├── scheduler.py      # Daily 9pm KST summary scheduler
-│   └── utils.py          # Logging, HTML formatting, helpers
-│
-├── data/                 # Auto-created — SQLite database file
-├── logs/                 # Auto-created — job_bot.log
-├── sessions/             # Auto-created — Telethon session file
-│
-├── main.py               # ⭐ Unified entry point (recommended)
-├── main_monitor.py       # Standalone monitor only
-├── main_admin.py         # Standalone admin bot only
-├── requirements.txt
-├── .env.example
-├── .gitignore
-└── README.md
-```
-
----
-
-## Requirements
-
-- **Python 3.11 or higher**
-- A personal Telegram account
-- Telegram API credentials (free)
-- A Telegram Bot token (free, from @BotFather)
-
----
-
-## Setup Guide
-
-### Step 1 — Get Telegram API credentials
-
-1. Go to **https://my.telegram.org/apps**
-2. Log in with your phone number
-3. Click **Create application**
-4. Copy your `api_id` and `api_hash`
-
-### Step 2 — Create an Admin Bot
-
-1. Open Telegram and message **@BotFather**
-2. Send `/newbot` and follow the prompts
-3. Copy the **bot token** (looks like `123456789:ABCdef...`)
-
-### Step 3 — Get your Telegram User ID
-
-1. Message **@userinfobot** on Telegram
-2. It replies with your numeric ID (e.g. `123456789`)
-
-### Step 4 — Install Python dependencies
-
-```bash
-# Create a virtual environment (recommended)
-python -m venv venv
-
-# Activate it
-source venv/bin/activate        # Linux / macOS
-venv\Scripts\activate           # Windows
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Step 5 — Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
-Open `.env` and fill in every value:
-
-```env
-API_ID=12345678
-API_HASH=your_api_hash_here
-PHONE_NUMBER=+998901234567
-BOT_TOKEN=123456789:ABCdef...
-ADMIN_USER_ID=987654321
-TARGET_GROUP=KoreaIshElonlari
-```
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `API_ID` | Telegram API app ID | `12345678` |
-| `API_HASH` | Telegram API app hash | `abc123def456...` |
-| `PHONE_NUMBER` | Your account phone number | `+998901234567` |
-| `BOT_TOKEN` | Admin bot token from @BotFather | `123:ABC...` |
-| `ADMIN_USER_ID` | Your Telegram numeric user ID | `987654321` |
-| `TARGET_GROUP` | Output group username or numeric ID | `KoreaIshElonlari` |
-
----
-
-## Running the Bot
-
-### ⭐ Recommended — run everything together
-
-```bash
-python main.py
-```
-
-This starts the monitor, admin bot, and daily scheduler in one process. On first run, Telegram will send a verification code to your phone — enter it in the terminal.
-
-### Alternative — run separately (two terminals)
-
-```bash
-# Terminal 1: monitor
-python main_monitor.py
-
-# Terminal 2: admin bot
-python main_admin.py
-```
-
-> ⚠️ When running separately, `@username` group resolution and the `🧪 Test Send` feature require both processes to be running together via `main.py`.
-
----
-
-## Admin Bot Commands
-
-Open Telegram and message your admin bot. All commands are also available as keyboard buttons.
-
-| Button / Command | Description |
-|-----------------|-------------|
-| 📋 List Groups / `/listgroups` | Show all monitored source groups with ID, link, and date added |
-| ➕ Add Group / `/addgroup` | Add a group by numeric ID or @username. Automatically resolves the real group name and checks membership |
-| ➖ Remove Group / `/removegroup` | Tap-to-remove inline keyboard — no typing required |
-| 🎯 Set Target / `/settarget` | Set the destination group where job posts are forwarded |
-| 🔍 Test Keyword / `/testkeyword` | Paste any message text to see if the filter detects it as a job post |
-| 📈 Stats / `/stats` | 7-day analytics: total forwarded, top source groups, language breakdown |
-| 🧪 Test Send / `/test` | Send a test message to the target group to verify connectivity |
-| 📊 Status / `/status` | Current monitor status, group list, and total messages forwarded |
-
-### How to get a group's numeric ID
-
-Forward any message from that group to **@userinfobot** — it will reply with the group's numeric ID (e.g. `-1001234567890`).
-
----
-
-## Message Format
-
-Every forwarded job post looks like this in the target group:
-
-```
-⚠️ New Message Information:
-
-Group: xxxx          ← clickable, opens the group
-Message Owner: xxxx              ← clickable, opens their profile
-Message Time: 2026-03-06 13:47:38 (KST)
-
-Message Text:
-xxxx
-```
-
-- Group name and author name are **clickable hyperlinks**
-- Time is always in **Korea Standard Time (KST)**
-- No "VIEW GROUP" preview cards
-- Join/leave service messages in the target group are **automatically deleted**
-
----
-
-## Keyword Detection
-
-The filter uses a **two-tier system**:
-
-### Tier 1 — Strong keywords (single match = job post)
-
-| Language | Examples |
-|----------|---------|
-| 🇺🇿 Uzbek | `ish bor`, `ishchi kerak`, `vakansiya`, `arbayt`, `tekpe`, `ish haqi`, `ishga olinadi` |
-| 🇷🇺 Russian | `вакансия`, `нужен работник`, `подработка`, `трудоустройство` |
-| 🇰🇷 Korean | `알바`, `구인`, `채용`, `시급`, `월급`, `구합니다` |
-
-### Tier 2 — Word combinations (both words must appear anywhere in the message)
-
-| Combo | Example message caught |
-|-------|----------------------|
-| `kerak` + person word | `"1 yigit kerak bugun zavod"` |
-| `ish` + location word | `"zavod uchun ish bor"` |
-| `работа` + context word | `"срочно работа есть склад"` |
-
-### Testing keywords
-
-Use the **🔍 Test Keyword** button in the admin bot — paste any message and get instant feedback showing which tier matched, which keywords triggered, and a confidence score.
-
----
-
-## Running as a Service (Linux)
-
-To keep the bot running after you close the terminal, create a systemd service:
-
-**`/etc/systemd/system/korea-ish-bot.service`**
-
-```ini
-[Unit]
-Description=Korea Ish Elonlari Bot
-After=network.target
-
-[Service]
-Type=simple
-User=youruser
-WorkingDirectory=/path/to/telegram_job_bot
-ExecStart=/path/to/venv/bin/python main.py
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable korea-ish-bot
-sudo systemctl start korea-ish-bot
-sudo systemctl status korea-ish-bot
-
-# View live logs
-sudo journalctl -u korea-ish-bot -f
-```
-
----
-
-## FAQ & Troubleshooting
-
-**Q: The bot starts but no messages are being forwarded.**
-
-Check in order:
-
-1. Run `python main.py` and look for `✅ JOB DETECTED` in the logs
-2. If you only see `MSG RECEIVED` but no detection — the messages don't contain job keywords. Use 🔍 **Test Keyword** to verify
-3. If you see no `MSG RECEIVED` at all — the monitor account is not a member of the source groups
-4. Use 🧪 **Test Send** to confirm the target group connection works
-
-**Q: I get `Bad Request: message is too long` in /listgroups.**
-
-This is handled automatically — the list is paginated into chunks of ~3800 characters. If it still happens, restart the bot with the latest `admin_bot.py`.
-
-**Q: Join/leave messages being deleted.**
-
-The personal Telegram account running the monitor must be an **admin** in the target group with the **"Delete messages"** permission enabled.
-
-**Q: The same job post appears twice in the target group.**
-
-This is the repost deduplication feature. Make sure you are running the latest `monitor.py` — it checks the `fwd_from` header of forwarded messages.
-
-**Q: I want to add a keyword that isn't in the list.**
-
-Open `bot/filters.py` and add it to the appropriate list in `STRONG_KEYWORDS`. Restart `main.py` for the change to take effect.
-
-**Q: Can I run this on a VPS / cloud server?**
-
-Yes. The recommended setup is a Linux VPS running the systemd service above. Any cloud provider works (DigitalOcean, Hetzner, AWS, etc.). The bot uses very little CPU and RAM.
-
----
-
-## Security Notes
-
-- Never commit your `.env` file — it contains your personal Telegram credentials
-- The `sessions/` folder contains the Telethon session file — treat it like a password
-- The admin bot only responds to your `ADMIN_USER_ID` — all other users are rejected
-- Add `.env`, `sessions/`, `data/`, and `logs/` to `.gitignore` (already included)
-
----
-
-## Dependencies
-
-```
-telethon==1.36.0      # Telegram client (userbot)
-aiogram==3.13.0       # Telegram Bot API framework (admin bot)
-python-dotenv==1.0.1  # .env file loader
-aiohttp==3.10.10      # Async HTTP (used by aiogram)
-```
-
----
-
-*Built for the Uzbek community in South Korea 🇺🇿🇰🇷*
->>>>>>> 4987fb4 (small update):README.md
+MIT License. See `LICENSE` for details.
