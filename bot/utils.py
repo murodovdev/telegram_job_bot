@@ -112,7 +112,7 @@ def build_job_post(
         f"<b>Guruh:</b> {group_part}\n"
         f"<b>Muallif:</b> {owner_part}\n"
         f"<b>Vaqt:</b> {time_str}\n\n"
-        f"<b>Xabar matni:</b>\n {safe_message_text}"
+        f"<b>Xabar matni:</b>\n{safe_message_text}"
     )
     return post
 
