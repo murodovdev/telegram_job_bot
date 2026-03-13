@@ -15,5 +15,8 @@ python-dotenv==1.0.1
 # Async HTTP (used internally by aiogram)
 aiohttp==3.10.10
 
+# QR code rendering for generate_session.py QR login
+qrcode==7.4.2
+
 # Standard library – no extra install needed:
 #   sqlite3, asyncio, logging, re, dataclasses, pathlib
