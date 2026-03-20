@@ -754,11 +754,14 @@ async def cmd_test_halal_receive(message: Message, state: FSMContext):
         lines[-1] = "2️⃣ <b>Groq AI:</b> ⚠️ API xatosi — tekshirib bo'lmadi"
         lines.append("\n⚠️ <b>Xulosa: O'TKAZIB YUBORILADI</b>")
         lines.append("API ishlamay qolsa bot to'xtab qolmasligi uchun o'tkazib yuboriladi.")
-    elif groq.verdict == "halol":
+    elif groq.verdict == "halol" or groq.verdict == "unclear":
         reason_safe = _html.escape(groq.reason or "")
-        lines[-1] = "2️⃣ <b>Groq AI:</b> ✅ HALOL"
+        verdict_label = "✅ HALOL" if groq.verdict == "halol" else "🤔 NOANIQ (unclear)"
+        lines[-1] = f"2️⃣ <b>Groq AI:</b> {verdict_label}"
         if reason_safe:
             lines.append(f"   Sabab: <i>{reason_safe}</i>")
+        if groq.verdict == "unclear":
+            lines.append("   <i>Noaniq holatlar o'tkazib yuboriladi (ehtiyotkor yondashuv)</i>")
         lines.append("\n✅ <b>Xulosa: GURUHGA YUBORILADI</b>")
     else:
         reason_safe = _html.escape(groq.reason or "")

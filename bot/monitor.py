@@ -200,12 +200,11 @@ def _make_message_handler(assigned_client, account_num: int):
         # "haram" yoki "unclear" → bloklaydi.
         # API xatosi bo'lsa → o'tkazib yuboriladi (bot to'xtab qolmasin).
         groq_result = await check_halal_with_groq(text)
-        if not groq_result.api_error and groq_result.verdict != "halol":
+        if not groq_result.api_error and groq_result.verdict == "haram":
             logger.info(
-                "[monitor/acct%s] SKIPPED (groq: %s) | reason=%s | "
+                "[monitor/acct%s] SKIPPED (groq: haram) | reason=%s | "
                 "chat_id=%s | msg_id=%s",
-                account_num, groq_result.verdict,
-                groq_result.reason, chat_id, msg_id,
+                account_num, groq_result.reason, chat_id, msg_id,
             )
             db.mark_processed(chat_id, msg_id)
             return
