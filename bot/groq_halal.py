@@ -101,7 +101,7 @@ Javob: {"verdict": "haram", "reason": "tekpe ishi harom"}
 
 Namuna 7 (HAROM):
 "삼겹살집 서빙 알바. 주 5일, 시급 12,000원"
-Javob: {"verdict": "haram", "reason": "삼겹살집 — cho'chqa go'shti restorani"}
+Javob: {"verdict": "haram", "reason":  "삼겹살집 — cho'chqa go'shti restorani"}
 
 Namuna 8 (HALOL):
 "Moshinali odamga ish bor. Yuk tashish. Seul ichida"
