@@ -91,6 +91,11 @@ DEDUP_SIMILARITY_THRESHOLD: float = float(
     os.getenv("DEDUP_SIMILARITY_THRESHOLD", "0.85")
 )
 
+# ── Groq AI (halollik tekshiruvi) ────────────────────────────────
+# Groq API key — https://console.groq.com
+# Bo'sh qoldirilsa, AI tekshiruvi o'chiriladi (faqat keyword filtr ishlaydi)
+GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+
 # ── Logging ───────────────────────────────────────────────────────
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 

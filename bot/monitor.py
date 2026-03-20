@@ -34,6 +34,7 @@ from bot.config import PHONE_NUMBER, PHONE_NUMBER_2, TARGET_GROUP
 from bot.config import DEDUP_WINDOW_HOURS, DEDUP_SIMILARITY_THRESHOLD
 from bot.filters import is_job_message
 from bot.halal_filter import is_haram_job
+from bot.groq_halal import check_halal_with_groq
 from bot.notifier import notify_admin
 from bot.utils import (
     build_job_post,
@@ -178,16 +179,35 @@ def _make_message_handler(assigned_client, account_num: int):
             )
             return
 
-        # ── 5.2 Halal filter ──────────────────────────────────────
-        # Ish e'loni ekanigi tasdiqlandi (Gate 5). Endi halolligini
-        # tekshiramiz. Haram toifa aniqlansa — post o'tkazilmaydi.
-        halal_result = is_haram_job(text)
-        if halal_result.is_haram:
+        # ── 5.2 Keyword-based halal pre-filter ───────────────────
+        # Aniq harom kalit so'zlar bo'lsa — API sarf qilmasdan bloklaydi.
+        # Bu 편의점, 삼겹살집, tekpe kabi aniq holatlarni tezda ushlab qoladi.
+        haram_kw = is_haram_job(text)
+        if haram_kw.is_haram:
             logger.info(
-                "[monitor/acct%s] SKIPPED (haram job) | category=%s | "                "keywords=%s | chat_id=%s | msg_id=%s",
-                account_num, halal_result.category,
-                halal_result.matched_keywords, chat_id, msg_id,
+                "[monitor/acct%s] SKIPPED (haram keyword) | category=%s | "
+                "keywords=%s | chat_id=%s | msg_id=%s",
+                account_num, haram_kw.category,
+                haram_kw.matched_keywords, chat_id, msg_id,
             )
+            db.mark_processed(chat_id, msg_id)
+            return
+
+        # ── 5.3 Groq AI halal check ───────────────────────────────
+        # Kalit so'z filtri o'tgan, lekin kontekst noaniq bo'lishi mumkin.
+        # Groq LLM matnni tushunib baholaydi.
+        # Faqat "halol" natijasida guruhga yuboriladi.
+        # "haram" yoki "unclear" → bloklaydi.
+        # API xatosi bo'lsa → o'tkazib yuboriladi (bot to'xtab qolmasin).
+        groq_result = await check_halal_with_groq(text)
+        if not groq_result.api_error and groq_result.verdict != "halol":
+            logger.info(
+                "[monitor/acct%s] SKIPPED (groq: %s) | reason=%s | "
+                "chat_id=%s | msg_id=%s",
+                account_num, groq_result.verdict,
+                groq_result.reason, chat_id, msg_id,
+            )
+            db.mark_processed(chat_id, msg_id)
             return
 
         # ── 5.5 Content duplicate gate ────────────────────────────
