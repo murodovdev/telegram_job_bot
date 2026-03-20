@@ -24,18 +24,38 @@ Railway Variables
 import asyncio
 import json
 import logging
-import os
 from dataclasses import dataclass
 from typing import Optional
 
 import aiohttp
 
+from bot.config import GROQ_API_KEY
+
 logger = logging.getLogger(__name__)
 
-GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL   = "llama-3.1-8b-instant"
 GROQ_TIMEOUT = 10   # sekund — agar API javob bermasa, o'tkazib yuboramiz
+
+# Fix 4: Persistent aiohttp session — har so'rovda yangi TCP konneksiya ochilmaydi.
+# Modul darajasida bitta session, butun bot ishlash davomida reuse qilinadi.
+_session: Optional[aiohttp.ClientSession] = None
+
+
+async def _get_session() -> aiohttp.ClientSession:
+    """Persistent aiohttp session qaytaradi. Yo'q bo'lsa yaratadi."""
+    global _session
+    if _session is None or _session.closed:
+        _session = aiohttp.ClientSession()
+    return _session
+
+
+async def close_session() -> None:
+    """Bot yopilayotganda sessionni to'g'ri yopish uchun. main.py dan chaqiriladi."""
+    global _session
+    if _session and not _session.closed:
+        await _session.close()
+        _session = None
 
 _SYSTEM_PROMPT = """Sen Koreyadagi o'zbek ishchilar uchun ish e'lonlarini tekshiruvchi filtrsаn.
 Ish e'lonlari asosan O'ZBEK tilida yoziladi. O'zbek tilini yaxshi tushunishing shart.
@@ -151,21 +171,21 @@ async def check_halal_with_groq(text: str) -> GroqHalalResult:
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                GROQ_API_URL,
-                json=payload,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=GROQ_TIMEOUT),
-            ) as resp:
-                if resp.status != 200:
-                    body = await resp.text()
-                    logger.warning(
-                        "[groq_halal] API error %d: %s", resp.status, body[:200]
-                    )
-                    return GroqHalalResult(verdict="halol", api_error=True)
+        session = await _get_session()
+        async with session.post(
+            GROQ_API_URL,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=GROQ_TIMEOUT),
+        ) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                logger.warning(
+                    "[groq_halal] API error %d: %s", resp.status, body[:200]
+                )
+                return GroqHalalResult(verdict="halol", api_error=True)
 
-                data = await resp.json()
+            data = await resp.json()
 
     except asyncio.TimeoutError:
         logger.warning("[groq_halal] Timeout after %ds — passing through", GROQ_TIMEOUT)

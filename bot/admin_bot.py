@@ -40,7 +40,7 @@ from bot.filters import is_job_message
 from bot.halal_filter import is_haram_job
 from bot.groq_halal import check_halal_with_groq
 from bot.notifier import set_bot as notifier_set_bot
-from bot.utils import setup_logging
+from bot.utils import setup_logging, safe_send_message, truncate, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -726,7 +726,7 @@ async def cb_review(callback: CallbackQuery):
     if action == "reject":
         db.delete_review_item(review_id)
         await callback.message.edit_text(
-            callback.message.html_text + "\n\n❌ <b>Rad etildi.</b>",
+            (callback.message.text or "") + "\n\n❌ Rad etildi.",
             parse_mode="HTML",
             reply_markup=None,
         )
@@ -740,7 +740,6 @@ async def cb_review(callback: CallbackQuery):
             await callback.answer("❌ Target guruh sozlanmagan!")
             return
 
-        from bot.utils import safe_send_message, build_job_post, truncate, utcnow
         from datetime import datetime, timezone
 
         post_text    = item["post_text"]
@@ -1327,6 +1326,52 @@ async def cmd_cancel(message: Message, state: FSMContext):
         return
     await state.clear()
     await message.answer("Operation cancelled.", reply_markup=_main_keyboard())
+
+
+# /clearstats ─────────────────────────────────────────────────────
+
+@router.message(Command("clearstats"))
+async def cmd_clear_stats(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.clear()
+    # Confirm step
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Ha, o'chirish", callback_data="clearstats:confirm"),
+        InlineKeyboardButton(text="❌ Bekor qilish",  callback_data="clearstats:cancel"),
+    ]])
+    await message.answer(
+        "⚠️ <b>Statistikani tozalash</b>\n\n"
+        "Barcha forwarded_stats ma'lumotlari o'chiriladi.\n"
+        "Bu amalni qaytarib bo'lmaydi.\n\n"
+        "Davom etasizmi?",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+
+@router.callback_query(F.data.startswith("clearstats:"))
+async def cb_clear_stats(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_USER_ID:
+        await callback.answer("🚫 Ruxsat yo'q.")
+        return
+    action = callback.data.split(":")[1]
+    if action == "cancel":
+        await callback.message.edit_text(
+            "❌ Bekor qilindi.",
+            reply_markup=None,
+        )
+        await callback.answer("Bekor qilindi.")
+        return
+    deleted = db.clear_all_stats()
+    await callback.message.edit_text(
+        f"✅ <b>Statistika tozalandi.</b>\n\n"
+        f"O'chirilgan yozuvlar: <b>{deleted}</b>",
+        parse_mode="HTML",
+        reply_markup=None,
+    )
+    await callback.answer("✅ Statistika tozalandi!")
+    logger.info("[admin_bot] Stats cleared by admin. %d rows deleted.", deleted)
 
 
 # ── Main ──────────────────────────────────────────────────────────

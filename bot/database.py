@@ -893,6 +893,19 @@ def get_daily_summary() -> dict:
     return {"total": total, "by_group": by_group, "by_lang": by_lang}
 
 
+def clear_all_stats() -> int:
+    """
+    Barcha forwarded_stats yozuvlarini o'chiradi.
+    /clearstats admin buyrug'i uchun ishlatiladi.
+    Qaytaradi: o'chirilgan qatorlar soni.
+    """
+    with _connection() as conn:
+        cursor = conn.execute("DELETE FROM forwarded_stats")
+        deleted = cursor.rowcount
+    logger.info("[DB] Cleared %d forwarded_stats rows.", deleted)
+    return deleted
+
+
 # ── Halal review queue ────────────────────────────────────────────
 
 def add_to_review_queue(

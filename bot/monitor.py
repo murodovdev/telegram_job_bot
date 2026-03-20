@@ -96,23 +96,55 @@ async def _send_to_review(
     )
 
     source_label = "🔑 Kalit so'z" if haram_source == "keyword" else "🤖 Groq AI"
-    preview = text[:300] + ("…" if len(text) > 300 else "")
+    preview = text[:400] + ("…" if len(text) > 400 else "")
 
     import html as _html
+    from datetime import datetime, timedelta
+
+    _KST = timezone(timedelta(hours=9))
+    time_display = "—"
+    if msg_time:
+        try:
+            _dt = datetime.fromisoformat(msg_time)
+            if _dt.tzinfo is None:
+                _dt = _dt.replace(tzinfo=timezone.utc)
+            time_display = _dt.astimezone(_KST).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            time_display = msg_time
+
+    _safe_group  = _html.escape(group_title or "—")
+    _safe_author = _html.escape(author_name or "—")
+    _group_part  = (
+        f'<a href="{_html.escape(group_link)}">{_safe_group}</a>'
+        if group_link else _safe_group
+    )
+    _author_part = (
+        f'<a href="{_html.escape(author_link)}">{_safe_author}</a>'
+        if author_link else _safe_author
+    )
+
     notify_text = (
         f"⚠️ <b>Harom deb topilgan ish e'loni</b>\n\n"
+        f"<b>Guruh:</b> {_group_part}\n"
+        f"<b>Muallif:</b> {_author_part}\n"
+        f"<b>Vaqt:</b> {time_display}\n\n"
         f"{source_label}: <i>{_html.escape(haram_reason)}</i>\n\n"
-        f"<b>Matn:</b>\n{_html.escape(preview)}"
+        f"<b>Xabar matni:</b>\n{_html.escape(preview)}"
     )
+
+    # Fix 8: callback_data Telegram 64 bayt limitini tekshirish
+    approve_cb = f"review:approve:{review_id}"
+    reject_cb  = f"review:reject:{review_id}"
+    assert len(approve_cb.encode()) <= 64, f"callback_data too long: {approve_cb}"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="✅ Tasdiqlash — guruhga yuborish",
-            callback_data=f"review:approve:{review_id}",
+            callback_data=approve_cb,
         ),
         InlineKeyboardButton(
             text="❌ Rad etish",
-            callback_data=f"review:reject:{review_id}",
+            callback_data=reject_cb,
         ),
     ]])
 
@@ -146,6 +178,10 @@ async def _send_to_review(
 # The set entry is always removed in a finally block so a failed send never
 # permanently blocks the content.
 _pending_hashes: set = set()
+
+# Fix 5: Groq API rate limit himoyasi.
+# Bir vaqtda maksimal 3 ta parallel Groq so'rov — free tier limit 30/min.
+_groq_semaphore = asyncio.Semaphore(3)
 
 
 def _get_target_id() -> Optional[int]:
@@ -284,8 +320,7 @@ def _make_message_handler(assigned_client, account_num: int):
         ) or ""
         _pre_msg_time = message.date
         if _pre_msg_time and _pre_msg_time.tzinfo is None:
-            from datetime import timezone as _tz
-            _pre_msg_time = _pre_msg_time.replace(tzinfo=_tz.utc)
+            _pre_msg_time = _pre_msg_time.replace(tzinfo=timezone.utc)
         _pre_msg_time_str = _pre_msg_time.isoformat() if _pre_msg_time else ""
 
         # ── 5.2 Keyword-based halal pre-filter ───────────────────
@@ -314,7 +349,9 @@ def _make_message_handler(assigned_client, account_num: int):
             return
 
         # ── 5.3 Groq AI halal check ───────────────────────────────
-        groq_result = await check_halal_with_groq(text)
+        # Semaphore bilan rate limit nazorat qilinadi — bir vaqtda max 3 ta so'rov.
+        async with _groq_semaphore:
+            groq_result = await check_halal_with_groq(text)
         if not groq_result.api_error and groq_result.verdict == "haram":
             logger.info(
                 "[monitor/acct%s] HARAM (groq) | reason=%s | "
@@ -387,35 +424,26 @@ def _make_message_handler(assigned_client, account_num: int):
         )
 
         # ── 6. Resolve entities ───────────────────────────────────
-        # Use the title/username already stored in the DB first — this avoids
-        # a live Telegram API call for the chat entity, which costs 100–2000ms
-        # whenever the entity is not already in Telethon's local cache.
-        # Only fall back to event.get_chat() if the DB has no record.
-        stored_group = db.get_source_group_by_id(chat_id)
-        group_title  = stored_group.title    if stored_group else None
-        group_link   = (
-            f"https://t.me/{stored_group.username}"
-            if stored_group and stored_group.username else None
-        )
+        # Fix 2: _pre_sender allaqachon Gate 5.1 da olingan — qayta get_sender()
+        # chaqirmaslik kerak. Bu har halol xabar uchun 100-500ms tejaydi.
+        # group_title ham DB dan allaqachon olingan (_pre_group_title).
+        group_title = _pre_group_title
+        group_link  = _pre_group_link or None
 
-        sender = None
-        try:
-            if not group_title:
-                # Not in DB yet — resolve from Telegram (rare path)
+        if not group_title or group_title == "Unknown Group":
+            # DB da topilmasa — Telegram API dan olish (kam uchraydi)
+            try:
                 chat        = await event.get_chat()
                 group_title = get_chat_display_name(chat)
                 group_link  = get_chat_link(chat)
-            sender = await event.get_sender()
-        except Exception as exc:
-            logger.warning(
-                "[monitor/acct%s] Could not resolve entities: %s", account_num, exc
-            )
+            except Exception as exc:
+                logger.warning(
+                    "[monitor/acct%s] Could not resolve chat: %s", account_num, exc
+                )
 
         group_title = group_title or "Unknown Group"
-        author_name = get_sender_display_name(sender)
-        author_link: Optional[str] = (
-            get_user_link(sender) if isinstance(sender, User) else None
-        )
+        author_name = _pre_author_name
+        author_link: Optional[str] = _pre_author_link or None
 
         # ── 7. Timestamp ──────────────────────────────────────────
         msg_time = message.date
@@ -534,6 +562,9 @@ async def _on_chat_action(event: events.ChatAction.Event) -> None:
 
 async def setup_monitor() -> None:
     """Start all clients and register event handlers."""
+    # Fix 7: Startupda _pending_hashes tozalanadi — avvalgi crash dan qolgan
+    # yozuvlar yangi sessiyada xabarlarni noto'g'ri bloklashini oldini oladi.
+    _pending_hashes.clear()
     phone_numbers = {1: PHONE_NUMBER, 2: PHONE_NUMBER_2 or PHONE_NUMBER}
 
     for account_num, client in enumerate(all_clients, start=1):
