@@ -735,36 +735,59 @@ async def cb_review(callback: CallbackQuery):
         return
 
     if action == "approve":
-        # Post ni target guruhga yuboramiz
         target = db.get_cached_target_id()
         if not target:
             await callback.answer("❌ Target guruh sozlanmagan!")
             return
 
-        post_text = item["post_text"]
+        from bot.utils import safe_send_message, build_job_post, truncate, utcnow
+        from datetime import datetime, timezone
 
-        # Format qilib yuboramiz
-        from bot.utils import build_job_post, truncate
-        from bot.config import ADMIN_USER_ID as _aid
+        post_text    = item["post_text"]
+        group_title  = item.get("group_title") or "Unknown Group"
+        group_link   = item.get("group_link") or None
+        author_name  = item.get("author_name") or "Unknown"
+        author_link  = item.get("author_link") or None
+        msg_time_str = item.get("msg_time") or ""
 
-        # Oddiy matn sifatida yuboramiz — format ma'lumotlari saqlanmagan
+        try:
+            msg_time = datetime.fromisoformat(msg_time_str) if msg_time_str else utcnow()
+        except ValueError:
+            msg_time = utcnow()
+        if msg_time.tzinfo is None:
+            msg_time = msg_time.replace(tzinfo=timezone.utc)
+
         import html as _html
+        from datetime import timedelta
+
+        KST = timezone(timedelta(hours=9))
+        kst_time = msg_time.astimezone(KST)
+        time_str = kst_time.strftime("%Y-%m-%d %H:%M:%S")
+
+        safe_group  = _html.escape(group_title)
+        safe_author = _html.escape(author_name)
+        safe_text   = _html.escape(truncate(post_text))
+
+        group_part  = f'<a href="{_html.escape(group_link)}">{safe_group}</a>' if group_link else safe_group
+        author_part = f'<a href="{_html.escape(author_link)}">{safe_author}</a>' if author_link else safe_author
+
         formatted = (
-            f"⚠️ <b>Yangi xabar ma'lumotlari:</b>\n\n"
-            f"<i>(Admin tomonidan tasdiqlangan)</i>\n\n"
-            f"Xabar matni:\n{_html.escape(truncate(post_text))}"
+            f"⚠️ <b>Yangi ish e'loni:</b>\n"
+            f"Guruh: {group_part}\n"
+            f"Muallif: {author_part}\n"
+            f"Vaqt: {time_str}\n\n"
+            f"Xabar matni:\n"
+            f"{safe_text}"
         )
 
         success = False
         if _client_1 and _client_1.is_connected():
-            from bot.utils import safe_send_message
             success = await safe_send_message(_client_1, target, formatted)
 
-        db.delete_review_item(review_id)
-
         if success:
+            db.delete_review_item(review_id)
             await callback.message.edit_text(
-                callback.message.html_text + "\n\n✅ <b>Tasdiqlandi va guruhga yuborildi.</b>",
+                (callback.message.text or "") + "\n\n✅ Tasdiqlandi va guruhga yuborildi.",
                 parse_mode="HTML",
                 reply_markup=None,
             )
@@ -772,7 +795,7 @@ async def cb_review(callback: CallbackQuery):
             logger.info("[admin_bot] Review %d approved and forwarded.", review_id)
         else:
             await callback.message.edit_text(
-                callback.message.html_text + "\n\n⚠️ <b>Tasdiqlandi, lekin yuborishda xato bo'ldi.</b>",
+                (callback.message.text or "") + "\n\n⚠️ Yuborishda xato. Qayta urinib ko'ring.",
                 parse_mode="HTML",
                 reply_markup=None,
             )

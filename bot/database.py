@@ -159,6 +159,11 @@ def init_db() -> None:
                 post_text    TEXT    NOT NULL,
                 haram_reason TEXT    NOT NULL DEFAULT '',
                 haram_source TEXT    NOT NULL DEFAULT '',
+                group_title  TEXT    NOT NULL DEFAULT '',
+                group_link   TEXT    NOT NULL DEFAULT '',
+                author_name  TEXT    NOT NULL DEFAULT '',
+                author_link  TEXT    NOT NULL DEFAULT '',
+                msg_time     TEXT    NOT NULL DEFAULT '',
                 created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
             );
         """)
@@ -174,6 +179,22 @@ def init_db() -> None:
             logger.info("[DB] Migrated: added assigned_account column")
         except sqlite3.OperationalError:
             pass  # column already exists — normal on subsequent startups
+
+        # Migrate halal_review_queue — add metadata columns if missing
+        for col, definition in [
+            ("group_title", "TEXT NOT NULL DEFAULT ''"),
+            ("group_link",  "TEXT NOT NULL DEFAULT ''"),
+            ("author_name", "TEXT NOT NULL DEFAULT ''"),
+            ("author_link", "TEXT NOT NULL DEFAULT ''"),
+            ("msg_time",    "TEXT NOT NULL DEFAULT ''"),
+        ]:
+            try:
+                conn.execute(
+                    f"ALTER TABLE halal_review_queue ADD COLUMN {col} {definition}"
+                )
+                logger.info("[DB] Migrated: added %s to halal_review_queue", col)
+            except sqlite3.OperationalError:
+                pass  # already exists
 
     logger.info("[DB] Schema initialised at %s", DATABASE_PATH)
 
@@ -880,17 +901,26 @@ def add_to_review_queue(
     post_text: str,
     haram_reason: str = "",
     haram_source: str = "",
+    group_title: str = "",
+    group_link: str = "",
+    author_name: str = "",
+    author_link: str = "",
+    msg_time: str = "",
 ) -> int:
     """
     Harom deb topilgan ish e'lonini review queue ga qo'shadi.
+    Guruh va yuboruvchi ma'lumotlari ham saqlanadi — admin
+    tasdiqlasa build_job_post() bilan to'liq format yuboriladi.
     Qaytaradi: yangi qator ID si (callback_data uchun ishlatiladi).
     """
     with _connection() as conn:
         cursor = conn.execute(
             "INSERT INTO halal_review_queue "
-            "(source_chat, source_msg, post_text, haram_reason, haram_source) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (source_chat, source_msg, post_text, haram_reason, haram_source),
+            "(source_chat, source_msg, post_text, haram_reason, haram_source, "
+            " group_title, group_link, author_name, author_link, msg_time) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (source_chat, source_msg, post_text, haram_reason, haram_source,
+             group_title, group_link, author_name, author_link, msg_time),
         )
         return cursor.lastrowid
 

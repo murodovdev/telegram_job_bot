@@ -11,7 +11,7 @@ Qaror mantiqi
 -------------
     "halol"   → guruhga yuboriladi ✅
     "haram"   → bloklaydi ❌
-    "unclear" → bloklaydi ❌  (faqat aniq halol bo'lsa o'tadi)
+    "unclear" → guruhga yuboriladi ✅  (noaniq = xavfsiz tomonga xato)
 
 API xatosi yoki timeout bo'lsa → o'tkazib yuboriladi ✅
 (API ishlamay qolsa bot to'xtab qolmasligi uchun)
