@@ -33,6 +33,7 @@ from bot.client import client_1, all_clients
 from bot.config import PHONE_NUMBER, PHONE_NUMBER_2, TARGET_GROUP
 from bot.config import DEDUP_WINDOW_HOURS, DEDUP_SIMILARITY_THRESHOLD
 from bot.filters import is_job_message
+from bot.halal_filter import is_haram_job
 from bot.notifier import notify_admin
 from bot.utils import (
     build_job_post,
@@ -174,6 +175,18 @@ def _make_message_handler(assigned_client, account_num: int):
             logger.info(
                 "[monitor/acct%s] SKIPPED (no keywords) | chat_id=%s | msg_id=%s | preview=%r",
                 account_num, chat_id, msg_id, text[:80],
+            )
+            return
+
+        # ── 5.2 Halal filter ──────────────────────────────────────
+        # Ish e'loni ekanigi tasdiqlandi (Gate 5). Endi halolligini
+        # tekshiramiz. Haram toifa aniqlansa — post o'tkazilmaydi.
+        halal_result = is_haram_job(text)
+        if halal_result.is_haram:
+            logger.info(
+                "[monitor/acct%s] SKIPPED (haram job) | category=%s | "                "keywords=%s | chat_id=%s | msg_id=%s",
+                account_num, halal_result.category,
+                halal_result.matched_keywords, chat_id, msg_id,
             )
             return
 
