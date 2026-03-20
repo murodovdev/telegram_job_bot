@@ -72,7 +72,7 @@ Bu so'zlar va iboralar O'ZBEK ARGOSI — harom emas:
 - Harom deb hisoblangan mahsulot yoki xizmatlarni taklif qiladigan ishlar
 - Harom ovqat yoki alkogol kabi mahsulotlarni yetkazib berish
 - Oziq-ovqat ishlab chiqaradigan yoki ularni qadoqlaydigan ishlar (sabzavot va mevalar bularning ichiga kirmaydi)
-
+- Pechene, tort, shirinlik, qandolat mahsulotlarini tayyorlash (confectionery) — chunki ba'zida ichiga alkogol yoki cho'chqa yog'i, go'shti qo'shiladi
 === REAL NAMUNALAR ===
 
 Namuna 1 (HALOL):
