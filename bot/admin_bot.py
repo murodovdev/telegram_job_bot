@@ -697,6 +697,88 @@ async def cmd_test_keyword_receive(message: Message, state: FSMContext):
         )
 
 
+# ── Halal review queue — Tasdiqlash / Rad etish ──────────────────
+
+@router.callback_query(F.data.startswith("review:"))
+async def cb_review(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_USER_ID:
+        await callback.answer("🚫 Ruxsat yo'q.")
+        return
+
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer("Xato callback.")
+        return
+
+    action    = parts[1]   # "approve" yoki "reject"
+    review_id = int(parts[2])
+
+    item = db.get_review_item(review_id)
+    if not item:
+        await callback.message.edit_text(
+            callback.message.text + "\n\n⚠️ <i>Bu e'lon allaqachon qayta ishlangan yoki muddati o'tgan.</i>",
+            parse_mode="HTML",
+            reply_markup=None,
+        )
+        await callback.answer()
+        return
+
+    if action == "reject":
+        db.delete_review_item(review_id)
+        await callback.message.edit_text(
+            callback.message.html_text + "\n\n❌ <b>Rad etildi.</b>",
+            parse_mode="HTML",
+            reply_markup=None,
+        )
+        await callback.answer("Rad etildi.")
+        logger.info("[admin_bot] Review %d rejected by admin.", review_id)
+        return
+
+    if action == "approve":
+        # Post ni target guruhga yuboramiz
+        target = db.get_cached_target_id()
+        if not target:
+            await callback.answer("❌ Target guruh sozlanmagan!")
+            return
+
+        post_text = item["post_text"]
+
+        # Format qilib yuboramiz
+        from bot.utils import build_job_post, truncate
+        from bot.config import ADMIN_USER_ID as _aid
+
+        # Oddiy matn sifatida yuboramiz — format ma'lumotlari saqlanmagan
+        import html as _html
+        formatted = (
+            f"⚠️ <b>Yangi xabar ma'lumotlari:</b>\n\n"
+            f"<i>(Admin tomonidan tasdiqlangan)</i>\n\n"
+            f"Xabar matni:\n{_html.escape(truncate(post_text))}"
+        )
+
+        success = False
+        if _client_1 and _client_1.is_connected():
+            from bot.utils import safe_send_message
+            success = await safe_send_message(_client_1, target, formatted)
+
+        db.delete_review_item(review_id)
+
+        if success:
+            await callback.message.edit_text(
+                callback.message.html_text + "\n\n✅ <b>Tasdiqlandi va guruhga yuborildi.</b>",
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+            await callback.answer("✅ Guruhga yuborildi!")
+            logger.info("[admin_bot] Review %d approved and forwarded.", review_id)
+        else:
+            await callback.message.edit_text(
+                callback.message.html_text + "\n\n⚠️ <b>Tasdiqlandi, lekin yuborishda xato bo'ldi.</b>",
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+            await callback.answer("⚠️ Yuborishda xato!")
+
+
 # /testhalal ──────────────────────────────────────────────────────
 
 @router.message(Command("testhalal"))
@@ -1232,6 +1314,10 @@ async def run_admin_bot() -> None:
 
     bot = Bot(token=BOT_TOKEN)
     notifier_set_bot(bot)
+
+    # Monitor.py ga bot instansini uzatamiz — review queue xabarlari yuborish uchun
+    from bot.monitor import set_aiogram_bot
+    set_aiogram_bot(bot)
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)

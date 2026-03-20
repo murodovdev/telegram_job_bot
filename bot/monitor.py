@@ -49,6 +49,74 @@ from bot.utils import (
 
 logger = logging.getLogger(__name__)
 
+# ── Review queue sender ───────────────────────────────────────────
+# Harom deb topilgan ish e'lonini admin botga yuboradi.
+# Yuborish uchun aiogram Bot instance lazim — admin_bot.py dan olinadi.
+_aiogram_bot = None
+
+def set_aiogram_bot(bot) -> None:
+    """admin_bot.py dan aiogram Bot instansini uzatish uchun."""
+    global _aiogram_bot
+    _aiogram_bot = bot
+
+
+async def _send_to_review(
+    text: str,
+    source_chat: int,
+    source_msg: int,
+    haram_reason: str,
+    haram_source: str,
+) -> None:
+    """
+    Harom deb topilgan postni DB ga saqlaydi va admin botga
+    'Tasdiqlash / Rad etish' tugmalar bilan yuboradi.
+    """
+    from bot.config import ADMIN_USER_ID
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    review_id = db.add_to_review_queue(
+        source_chat=source_chat,
+        source_msg=source_msg,
+        post_text=text,
+        haram_reason=haram_reason,
+        haram_source=haram_source,
+    )
+
+    source_label = "🔑 Kalit so'z" if haram_source == "keyword" else "🤖 Groq AI"
+    preview = text[:300] + ("…" if len(text) > 300 else "")
+
+    import html as _html
+    notify_text = (
+        f"⚠️ <b>Harom deb topilgan ish e'loni</b>\n\n"
+        f"{source_label}: <i>{_html.escape(haram_reason)}</i>\n\n"
+        f"<b>Matn:</b>\n{_html.escape(preview)}"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="✅ Tasdiqlash — guruhga yuborish",
+            callback_data=f"review:approve:{review_id}",
+        ),
+        InlineKeyboardButton(
+            text="❌ Rad etish",
+            callback_data=f"review:reject:{review_id}",
+        ),
+    ]])
+
+    if _aiogram_bot:
+        try:
+            await _aiogram_bot.send_message(
+                chat_id=ADMIN_USER_ID,
+                text=notify_text,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+            logger.info("[monitor] Review request sent to admin | review_id=%d", review_id)
+        except Exception as exc:
+            logger.warning("[monitor] Failed to send review to admin: %s", exc)
+    else:
+        logger.warning("[monitor] _aiogram_bot not set — review not sent to admin")
+
 # ── Race-condition guard for Gate 5.5 ────────────────────────────
 #
 # Problem: two accounts can receive the same copy-paste message within
@@ -180,33 +248,40 @@ def _make_message_handler(assigned_client, account_num: int):
             return
 
         # ── 5.2 Keyword-based halal pre-filter ───────────────────
-        # Aniq harom kalit so'zlar bo'lsa — API sarf qilmasdan bloklaydi.
-        # Bu 편의점, 삼겹살집, tekpe kabi aniq holatlarni tezda ushlab qoladi.
         haram_kw = is_haram_job(text)
         if haram_kw.is_haram:
             logger.info(
-                "[monitor/acct%s] SKIPPED (haram keyword) | category=%s | "
+                "[monitor/acct%s] HARAM (keyword) | category=%s | "
                 "keywords=%s | chat_id=%s | msg_id=%s",
                 account_num, haram_kw.category,
                 haram_kw.matched_keywords, chat_id, msg_id,
             )
             db.mark_processed(chat_id, msg_id)
+            await _send_to_review(
+                text=text,
+                source_chat=chat_id,
+                source_msg=msg_id,
+                haram_reason=f"Kalit so'z: {', '.join(haram_kw.matched_keywords)}",
+                haram_source="keyword",
+            )
             return
 
         # ── 5.3 Groq AI halal check ───────────────────────────────
-        # Kalit so'z filtri o'tgan, lekin kontekst noaniq bo'lishi mumkin.
-        # Groq LLM matnni tushunib baholaydi.
-        # Faqat "halol" natijasida guruhga yuboriladi.
-        # "haram" yoki "unclear" → bloklaydi.
-        # API xatosi bo'lsa → o'tkazib yuboriladi (bot to'xtab qolmasin).
         groq_result = await check_halal_with_groq(text)
         if not groq_result.api_error and groq_result.verdict == "haram":
             logger.info(
-                "[monitor/acct%s] SKIPPED (groq: haram) | reason=%s | "
+                "[monitor/acct%s] HARAM (groq) | reason=%s | "
                 "chat_id=%s | msg_id=%s",
                 account_num, groq_result.reason, chat_id, msg_id,
             )
             db.mark_processed(chat_id, msg_id)
+            await _send_to_review(
+                text=text,
+                source_chat=chat_id,
+                source_msg=msg_id,
+                haram_reason=groq_result.reason or "AI tomonidan harom deb topildi",
+                haram_source="groq",
+            )
             return
 
         # ── 5.5 Content duplicate gate ────────────────────────────

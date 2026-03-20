@@ -148,6 +148,19 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_ch_hash ON content_hashes (text_hash);
             CREATE INDEX IF NOT EXISTS idx_ch_time ON content_hashes (seen_at);
+
+            -- Halal review queue: harom deb topilgan ish e'lonlari admin
+            -- tasdiqlashini kutadi. Admin "Tasdiqlash" bosganda guruhga yuboriladi,
+            -- "Rad etish" bosganda o'chiriladi.
+            CREATE TABLE IF NOT EXISTS halal_review_queue (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_chat  INTEGER NOT NULL,
+                source_msg   INTEGER NOT NULL,
+                post_text    TEXT    NOT NULL,
+                haram_reason TEXT    NOT NULL DEFAULT '',
+                haram_source TEXT    NOT NULL DEFAULT '',
+                created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
         """)
 
         # ── Safe migrations ───────────────────────────────────────
@@ -857,3 +870,59 @@ def get_daily_summary() -> dict:
         by_lang = {r["matched_lang"] or "unknown": r["cnt"] for r in lang_rows}
 
     return {"total": total, "by_group": by_group, "by_lang": by_lang}
+
+
+# ── Halal review queue ────────────────────────────────────────────
+
+def add_to_review_queue(
+    source_chat: int,
+    source_msg: int,
+    post_text: str,
+    haram_reason: str = "",
+    haram_source: str = "",
+) -> int:
+    """
+    Harom deb topilgan ish e'lonini review queue ga qo'shadi.
+    Qaytaradi: yangi qator ID si (callback_data uchun ishlatiladi).
+    """
+    with _connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO halal_review_queue "
+            "(source_chat, source_msg, post_text, haram_reason, haram_source) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (source_chat, source_msg, post_text, haram_reason, haram_source),
+        )
+        return cursor.lastrowid
+
+
+def get_review_item(review_id: int) -> Optional[dict]:
+    """Review queue dan bitta yozuvni oladi."""
+    with _connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM halal_review_queue WHERE id = ?", (review_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_review_item(review_id: int) -> None:
+    """Review queue dan yozuvni o'chiradi (tasdiqlangan yoki rad etilgan)."""
+    with _connection() as conn:
+        conn.execute(
+            "DELETE FROM halal_review_queue WHERE id = ?", (review_id,)
+        )
+
+
+def cleanup_review_queue(keep_hours: int = 48) -> int:
+    """
+    48 soatdan eski review queue yozuvlarini o'chiradi.
+    Admin javob bermagan holatlar uchun.
+    """
+    with _connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM halal_review_queue WHERE created_at < datetime('now', ?)",
+            (f"-{keep_hours} hours",),
+        )
+        deleted = cursor.rowcount
+    if deleted:
+        logger.info("[DB] Pruned %d old review_queue rows", deleted)
+    return deleted
