@@ -40,39 +40,23 @@ GROQ_TIMEOUT = 10   # sekund — agar API javob bermasa, o'tkazib yuboramiz
 _SYSTEM_PROMPT = """You are a filter that reviews job postings for Muslim job seekers. You should only allow halal jobs to pass through.
 
 Jobs considered haram:
-
 Producing, selling, or serving alcohol (bar, beer house, wine shop, liquor store)
-
 Direct work involving pork (samgyeopsal, jokbal, bossam restaurant, pig farm, pork factory)
-
 Bar, nightclub, room salon, host bar, karaoke (alcohol/nightlife related)
-
 Delivery work (tekpe / courier work)
-
 Gambling, casino, betting, lottery sales
-
 Adult entertainment, strip clubs
-
 Interest-based loan or insurance sales (where the main job is selling interest-based financial products)
-
 Convenience stores (편의점) — because alcohol and cigarettes are sold there
-
 Food production factories (if pork or other haram products are involved)
 
 Jobs considered halal:
-
 Factory, warehouse, manufacturing (if not food-related)
-
 Construction, cleaning, moving/carrying
-
-Halal restaurant or kitchen (without pork and alcohol)
-
+Halal restaurant or kitchen (without pork and alcohol
 Shop/store (if alcohol and cigarettes are not sold)
-
 IT, office, service jobs
-
 Farm work (if no pigs are involved)
-
 Respond only in JSON format and write nothing else:
 {"verdict": "halol" or "haram" or "unclear", "reason": "qisqa sabab"}"""
 
