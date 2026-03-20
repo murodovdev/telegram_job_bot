@@ -66,7 +66,7 @@ Bu so'zlar va iboralar O'ZBEK ARGOSI — harom emas:
 - Tungi klub, room salon (룸살롱, 유흥업소, ночной клуб)
 - Tekpe ishi (텍페, tekpe, tekpa)
 - Kazino, qimor (카지노, 도박, kazino)
-- Kattalar ko'ngilocha (성인업소, стриптиз)
+- (성인업소, стриптиз)
 - Foizga asoslangan kredit/sug'urta savdosi (보험영업, 대출영업)
 - Convenience store (편의점, CU, GS25)
 - Harom deb hisoblangan mahsulot yoki xizmatlarni taklif qiladigan ishlar
