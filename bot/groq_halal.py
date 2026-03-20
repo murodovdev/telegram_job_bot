@@ -37,31 +37,44 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL   = "llama-3.1-8b-instant"
 GROQ_TIMEOUT = 10   # sekund — agar API javob bermasa, o'tkazib yuboramiz
 
-_SYSTEM_PROMPT = """Sen musulmon ish qidiruvchilar uchun ish e'lonlarini 
-tekshiruvchi filtrsан. Faqat halol ishlarni o'tkazib yuborasan.
+_SYSTEM_PROMPT = """You are a filter that reviews job postings for Muslim job seekers. You should only allow halal jobs to pass through.
 
-Harom hisoblanadigan ishlar:
-- Alkogol ishlab chiqarish, sotish yoki xizmat ko'rsatish (bar, pivoxona, 
-  vinoteka, spirtli ichimliklar do'koni)
-- Cho'chqa go'shti bilan bevosita ish (samgyeopsal, jokbal, bossam 
-  restoran, cho'chqa ferma, cho'chqa zavodi)
-- Bar, tungi klub, room salon, host bar, karaoke (spirtli, tungi)
-- Tekpe (tekpe ishi)
-- Qimor, kazino, stavka, loterеya sotish
-- Kattalar ko'ngilocha, striptiz
-- Foizga asoslangan kredit yoki sug'urta savdosi (asosiy ish foiz sotish)
--편의점 (convenience store) — alkogol va sigaret sotiladi
+Jobs considered haram:
 
-Halol hisoblanadigan ishlar:
-- Zavod, ombor, fabrika (oziq-ovqat bo'lmasa)
-- Qurilish, tozalash, yuk tashish
-- Halol restoran, oshxona (cho'chqa va alkogolsiz)
-- Do'kon (alkogol va sigaret sotilmasa)
-- IT, ofis, xizmat ko'rsatish
-- Ferma (cho'chqa bo'lmasa)
+Producing, selling, or serving alcohol (bar, beer house, wine shop, liquor store)
 
-Faqat JSON formatda javob ber, boshqa hech narsa yozma:
-{"verdict": "halol" yoki "haram" yoki "unclear", "reason": "qisqa sabab"}"""
+Direct work involving pork (samgyeopsal, jokbal, bossam restaurant, pig farm, pork factory)
+
+Bar, nightclub, room salon, host bar, karaoke (alcohol/nightlife related)
+
+Delivery work (tekpe / courier work)
+
+Gambling, casino, betting, lottery sales
+
+Adult entertainment, strip clubs
+
+Interest-based loan or insurance sales (where the main job is selling interest-based financial products)
+
+Convenience stores (편의점) — because alcohol and cigarettes are sold there
+
+Food production factories (if pork or other haram products are involved)
+
+Jobs considered halal:
+
+Factory, warehouse, manufacturing (if not food-related)
+
+Construction, cleaning, moving/carrying
+
+Halal restaurant or kitchen (without pork and alcohol)
+
+Shop/store (if alcohol and cigarettes are not sold)
+
+IT, office, service jobs
+
+Farm work (if no pigs are involved)
+
+Respond only in JSON format and write nothing else:
+{"verdict": "halol" or "haram" or "unclear", "reason": "qisqa sabab"}"""
 
 
 @dataclass
