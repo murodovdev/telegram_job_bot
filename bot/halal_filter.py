@@ -48,7 +48,11 @@ HARAM_CATEGORIES: dict[str, list[str]] = {
         "씨유",        # CU koreys yozuvi
         "지에스",      # GS koreys yozuvi
         "cu 알바",
+        "CU",
+        "cu"
         "gs25",
+        "gs",
+        "GS25",
         "gs 25",
         "cu편의점",
         "gs편의점",
