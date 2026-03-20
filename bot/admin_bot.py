@@ -37,6 +37,8 @@ from aiogram.types import (
 from bot.config import BOT_TOKEN, ADMIN_USER_ID, ACCOUNT_2_ENABLED
 import bot.database as db
 from bot.filters import is_job_message
+from bot.halal_filter import is_haram_job
+from bot.groq_halal import check_halal_with_groq
 from bot.notifier import set_bot as notifier_set_bot
 from bot.utils import setup_logging
 
@@ -68,6 +70,10 @@ class TestKeywordState(StatesGroup):
     waiting_for_text = State()
 
 
+class TestHalalState(StatesGroup):
+    waiting_for_text = State()
+
+
 class BlockUserState(StatesGroup):
     waiting_for_user = State()   # admin forwards a msg or sends a user ID
     waiting_for_reason = State() # optional reason
@@ -96,6 +102,7 @@ def _main_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📊 Status"),       KeyboardButton(text="🧪 Test Send")],
             [KeyboardButton(text="📈 Stats"),        KeyboardButton(text="🔍 Test Keyword")],
             [KeyboardButton(text="🔎 Check Groups"), KeyboardButton(text="🚫 Blocked Users")],
+            [KeyboardButton(text="🕌 Test Halal")],
         ],
         resize_keyboard=True,
     )
@@ -688,6 +695,80 @@ async def cmd_test_keyword_receive(message: Message, state: FSMContext):
             parse_mode="HTML",
             reply_markup=_main_keyboard(),
         )
+
+
+# /testhalal ──────────────────────────────────────────────────────
+
+@router.message(Command("testhalal"))
+@router.message(F.text == "🕌 Test Halal")
+async def cmd_test_halal_start(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.set_state(TestHalalState.waiting_for_text)
+    await message.answer(
+        "🕌 <b>Test Halal Filter</b>\n\n"
+        "Ish e'loni matnini yuboring — ikki qatlamli halollik tekshiruvi amalga oshiriladi:\n\n"
+        "1️⃣ <b>Keyword filtr</b> — aniq harom kalit so'zlar\n"
+        "2️⃣ <b>Groq AI</b> — kontekstni tushunib baholash\n\n"
+        "/cancel — bekor qilish.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+
+@router.message(TestHalalState.waiting_for_text)
+async def cmd_test_halal_receive(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    raw = (message.text or "").strip()
+    if raw.lower() == "/cancel":
+        await state.clear()
+        await message.answer("Bekor qilindi.", reply_markup=_main_keyboard())
+        return
+
+    await state.clear()
+    await message.answer("⏳ Tekshirilmoqda...", parse_mode="HTML")
+
+    lines = ["🕌 <b>Halal Filter Test Natijasi</b>\n"]
+
+    # ── 1-qadam: Keyword filtr ────────────────────────────────────
+    haram_kw = is_haram_job(raw)
+    if haram_kw.is_haram:
+        kw_safe = _html.escape(", ".join(haram_kw.matched_keywords))
+        cat_safe = _html.escape(haram_kw.category or "")
+        lines.append("1️⃣ <b>Keyword filtr:</b> ❌ HAROM")
+        lines.append(f"   Toifa: <code>{cat_safe}</code>")
+        lines.append(f"   Kalit so'z: <code>{kw_safe}</code>")
+        lines.append("\n🚫 <b>Xulosa: BLOKLANGAN</b> (keyword filtrida)")
+        lines.append("Groq AI tekshiruvi shart emas — aniq harom kalit so'z topildi.")
+        await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=_main_keyboard())
+        return
+
+    lines.append("1️⃣ <b>Keyword filtr:</b> ✅ Aniq harom kalit so'z topilmadi")
+
+    # ── 2-qadam: Groq AI ──────────────────────────────────────────
+    lines.append("2️⃣ <b>Groq AI:</b> so'rov yuborilmoqda...")
+    groq = await check_halal_with_groq(raw)
+
+    if groq.api_error:
+        lines[-1] = "2️⃣ <b>Groq AI:</b> ⚠️ API xatosi — tekshirib bo'lmadi"
+        lines.append("\n⚠️ <b>Xulosa: O'TKAZIB YUBORILADI</b>")
+        lines.append("API ishlamay qolsa bot to'xtab qolmasligi uchun o'tkazib yuboriladi.")
+    elif groq.verdict == "halol":
+        reason_safe = _html.escape(groq.reason or "")
+        lines[-1] = "2️⃣ <b>Groq AI:</b> ✅ HALOL"
+        if reason_safe:
+            lines.append(f"   Sabab: <i>{reason_safe}</i>")
+        lines.append("\n✅ <b>Xulosa: GURUHGA YUBORILADI</b>")
+    else:
+        reason_safe = _html.escape(groq.reason or "")
+        verdict_safe = _html.escape(groq.verdict or "")
+        lines[-1] = f"2️⃣ <b>Groq AI:</b> ❌ {verdict_safe.upper()}"
+        if reason_safe:
+            lines.append(f"   Sabab: <i>{reason_safe}</i>")
+        lines.append("\n🚫 <b>Xulosa: BLOKLANGAN</b> (Groq AI)")
+
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=_main_keyboard())
 
 
 # /stats ──────────────────────────────────────────────────────────
