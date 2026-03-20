@@ -51,6 +51,7 @@ Convenience stores (편의점) — because alcohol and cigarettes are sold there
 Food production factories (if pork or other haram products are involved)
 
 Jobs considered halal:
+Packing, sorting, and similar work involving vegetables and fruits.
 Factory, warehouse, manufacturing (if not food-related)
 Construction, cleaning, moving/carrying
 Halal restaurant or kitchen (without pork and alcohol
