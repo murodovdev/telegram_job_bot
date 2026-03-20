@@ -66,10 +66,18 @@ async def _send_to_review(
     source_msg: int,
     haram_reason: str,
     haram_source: str,
-) -> None:
+    group_title: str = "",
+    group_link: str = "",
+    author_name: str = "",
+    author_link: str = "",
+    msg_time: str = "",
+) -> bool:
     """
     Harom deb topilgan postni DB ga saqlaydi va admin botga
     'Tasdiqlash / Rad etish' tugmalar bilan yuboradi.
+    Guruh va yuboruvchi metadata ham saqlanadi — approve da
+    to'liq format bilan guruhga yuboriladi.
+    Qaytaradi: True = muvaffaqiyatli, False = xato.
     """
     from bot.config import ADMIN_USER_ID
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -80,6 +88,11 @@ async def _send_to_review(
         post_text=text,
         haram_reason=haram_reason,
         haram_source=haram_source,
+        group_title=group_title,
+        group_link=group_link,
+        author_name=author_name,
+        author_link=author_link,
+        msg_time=msg_time,
     )
 
     source_label = "🔑 Kalit so'z" if haram_source == "keyword" else "🤖 Groq AI"
@@ -112,10 +125,13 @@ async def _send_to_review(
                 reply_markup=keyboard,
             )
             logger.info("[monitor] Review request sent to admin | review_id=%d", review_id)
+            return True
         except Exception as exc:
             logger.warning("[monitor] Failed to send review to admin: %s", exc)
+            return False
     else:
         logger.warning("[monitor] _aiogram_bot not set — review not sent to admin")
+        return False
 
 # ── Race-condition guard for Gate 5.5 ────────────────────────────
 #
@@ -247,6 +263,31 @@ def _make_message_handler(assigned_client, account_num: int):
             )
             return
 
+        # ── 5.1 Pre-resolve entities (lightweight) ────────────────
+        # Guruh nomi DB dan bepul olinadi (O(1), API chaqiruvi yo'q).
+        # Sender keyinchalik to'liq resolve qilinadi, bu yerda try/except
+        # bilan oldindan olamiz — review queue uchun kerak.
+        _stored_group = db.get_source_group_by_id(chat_id)
+        _pre_group_title = _stored_group.title if _stored_group else "Unknown Group"
+        _pre_group_link  = (
+            f"https://t.me/{_stored_group.username}"
+            if _stored_group and _stored_group.username else ""
+        )
+        _pre_sender = None
+        try:
+            _pre_sender = await event.get_sender()
+        except Exception:
+            pass
+        _pre_author_name = get_sender_display_name(_pre_sender)
+        _pre_author_link = (
+            get_user_link(_pre_sender) if isinstance(_pre_sender, User) else ""
+        ) or ""
+        _pre_msg_time = message.date
+        if _pre_msg_time and _pre_msg_time.tzinfo is None:
+            from datetime import timezone as _tz
+            _pre_msg_time = _pre_msg_time.replace(tzinfo=_tz.utc)
+        _pre_msg_time_str = _pre_msg_time.isoformat() if _pre_msg_time else ""
+
         # ── 5.2 Keyword-based halal pre-filter ───────────────────
         haram_kw = is_haram_job(text)
         if haram_kw.is_haram:
@@ -256,14 +297,20 @@ def _make_message_handler(assigned_client, account_num: int):
                 account_num, haram_kw.category,
                 haram_kw.matched_keywords, chat_id, msg_id,
             )
-            db.mark_processed(chat_id, msg_id)
-            await _send_to_review(
+            sent = await _send_to_review(
                 text=text,
                 source_chat=chat_id,
                 source_msg=msg_id,
                 haram_reason=f"Kalit so'z: {', '.join(haram_kw.matched_keywords)}",
                 haram_source="keyword",
+                group_title=_pre_group_title,
+                group_link=_pre_group_link,
+                author_name=_pre_author_name,
+                author_link=_pre_author_link,
+                msg_time=_pre_msg_time_str,
             )
+            if sent:
+                db.mark_processed(chat_id, msg_id)
             return
 
         # ── 5.3 Groq AI halal check ───────────────────────────────
@@ -274,14 +321,20 @@ def _make_message_handler(assigned_client, account_num: int):
                 "chat_id=%s | msg_id=%s",
                 account_num, groq_result.reason, chat_id, msg_id,
             )
-            db.mark_processed(chat_id, msg_id)
-            await _send_to_review(
+            sent = await _send_to_review(
                 text=text,
                 source_chat=chat_id,
                 source_msg=msg_id,
                 haram_reason=groq_result.reason or "AI tomonidan harom deb topildi",
                 haram_source="groq",
+                group_title=_pre_group_title,
+                group_link=_pre_group_link,
+                author_name=_pre_author_name,
+                author_link=_pre_author_link,
+                msg_time=_pre_msg_time_str,
             )
+            if sent:
+                db.mark_processed(chat_id, msg_id)
             return
 
         # ── 5.5 Content duplicate gate ────────────────────────────
