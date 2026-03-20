@@ -3014,3 +3014,46 @@ AttributeError: 'Message' object has no attribute 'caption'. Did you mean: 'acti
 2026-03-20 20:15:26 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002044373140 | msg_id=14707 | preview='🔤🔤🔤🔤🔤🔤🔤🔤\n\n   🔤🔤🔤🔤🔤🔤🔤\n    \n🩸🅰️🩸🩸❓🅰️🩸🅰️\n🫵🩸🩸🩸🩸🅰️🩸🩸🩸\n23 mart dushanba\n2️⃣3️⃣ 🔤🔤🔤🔤\n🔤🔤'
 2026-03-20 20:15:26 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001754360080 | msg_id=25092
 2026-03-20 20:15:26 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001754360080 | msg_id=25092 | preview='🔤🔤🔤🔤🔤🔤🔤🔤\n\n   🔤🔤🔤🔤🔤🔤🔤\n    \n🩸🅰️🩸🩸❓🅰️🩸🅰️\n🫵🩸🩸🩸🩸🅰️🩸🩸🩸\n23 mart dushanba\n2️⃣3️⃣ 🔤🔤🔤🔤\n🔤🔤'
+2026-03-20 22:43:52 | INFO     | main                 | ============================================================
+2026-03-20 22:43:52 | INFO     | main                 |   Korea Ish E'lonlari — Starting
+2026-03-20 22:43:52 | INFO     | main                 |   Accounts active: 2
+2026-03-20 22:43:52 | INFO     | main                 | ============================================================
+2026-03-20 22:43:52 | INFO     | bot.database         | [DB] Migrated: added group_title to halal_review_queue
+2026-03-20 22:43:52 | INFO     | bot.database         | [DB] Migrated: added group_link to halal_review_queue
+2026-03-20 22:43:52 | INFO     | bot.database         | [DB] Migrated: added author_name to halal_review_queue
+2026-03-20 22:43:52 | INFO     | bot.database         | [DB] Migrated: added author_link to halal_review_queue
+2026-03-20 22:43:52 | INFO     | bot.database         | [DB] Migrated: added msg_time to halal_review_queue
+2026-03-20 22:43:52 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-20 22:43:52 | INFO     | bot.database         | [DB] Pruned 11 old original_msg_index rows (keep_days=7)
+2026-03-20 22:43:52 | INFO     | bot.monitor          | [monitor] Connecting account 1 …
+2026-03-20 22:43:54 | INFO     | bot.monitor          | [monitor] Account 1 logged in as: quvonchbek (id=2046196282)
+2026-03-20 22:43:54 | INFO     | bot.monitor          | [monitor] Account 1 monitoring 53 group(s)
+2026-03-20 22:43:54 | INFO     | bot.monitor          | [monitor] Connecting account 2 …
+2026-03-20 22:43:56 | INFO     | bot.monitor          | [monitor] Account 2 logged in as: 무로토브 (id=8367892539)
+2026-03-20 22:43:56 | INFO     | bot.monitor          | [monitor] Account 2 monitoring 5 group(s)
+2026-03-20 22:43:56 | INFO     | bot.monitor          | [monitor] Target: Korea Ish E'lonlari (-1003744320676)
+2026-03-20 22:43:56 | INFO     | bot.monitor          | [monitor] 👂 Listening on 2 account(s) …
+2026-03-20 22:43:56 | INFO     | main                 | [main] Starting admin bot and scheduler …
+2026-03-20 22:43:56 | INFO     | main                 | [main] ✅ All systems running. Press Ctrl+C to stop.
+2026-03-20 22:43:56 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-20 22:43:57 | INFO     | bot.admin_bot        | [admin_bot] Starting admin bot …
+2026-03-20 22:43:57 | INFO     | bot.scheduler        | [scheduler] Daily summary scheduler started (fires at 21:00 KST).
+2026-03-20 22:43:57 | INFO     | bot.scheduler        | [scheduler] Next daily summary in 80163 seconds (at 2026-03-21 21:00 KST).
+2026-03-20 22:44:51 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001490331350 | msg_id=88361
+2026-03-20 22:44:51 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001490331350 | msg_id=88361 | preview='Excellent International Trading Opportunity with Super Value USDT Exchange Rates'
+2026-03-20 22:44:55 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001511479567 | msg_id=11455
+2026-03-20 22:44:55 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001511479567 | msg_id=11455 | preview='**🚨Бренд** таварлар**\n\n👟 KRASOFKALAR\n🍊ATIRLAR\n😎OCHKILAR \n\n**🚨Шошилинг**\n**⚠️**Ян'
+2026-03-20 22:45:15 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001409501480 | msg_id=43541
+2026-03-20 22:45:15 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001409501480 | msg_id=43541 | preview='Assalomu alaykum ertaga nonsanga hayit namozga boradigan moshina bormi?'
+2026-03-20 22:46:08 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001754360080 | msg_id=25117
+2026-03-20 22:46:08 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001754360080 | msg_id=25117 | preview='Incheon Aviakkassa Xizmati endi 24-soat 7-kun xizmatingizda\n Murojat uchun tel \n'
+2026-03-20 22:46:37 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002858032342 | msg_id=7223
+2026-03-20 22:46:37 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002858032342 | msg_id=7223 | preview='경기 용인시 처인구 백옥대로 1137-1 3F'
+2026-03-20 22:46:56 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002858032342 | msg_id=7224
+2026-03-20 22:46:56 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002858032342 | msg_id=7224 | preview='Bu masjidda nechida oʻqilarkin xabarilar yo‘me'
+2026-03-20 22:47:14 | WARNING  | bot.database         | [DB] Source group already exists: -1001857660612
+2026-03-20 22:47:14 | INFO     | bot.database         | [DB] Group -1001857660612 reassigned to account 2 (stored as -1001857660612)
+2026-03-20 22:47:35 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001503748476 | msg_id=79854
+2026-03-20 22:47:35 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001503748476 | msg_id=79854 | preview='Ha tagidagi manzilda'
+2026-03-20 22:47:38 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002729014093 | msg_id=14178
+2026-03-20 22:47:38 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002729014093 | msg_id=14178 | preview='Продам сим- карты\nКому интересно пишите \nФиз. Сим-карты\n\nВ наличии более 100+ шт'
