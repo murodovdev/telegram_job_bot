@@ -2966,3 +2966,51 @@ AttributeError: 'Message' object has no attribute 'caption'. Did you mean: 'acti
 2026-03-13 21:51:37 | INFO     | bot.scheduler        | [scheduler] Next daily summary in 83303 seconds (at 2026-03-14 21:00 KST).
 2026-03-13 21:52:13 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002666264446 | msg_id=1289
 2026-03-13 21:52:13 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002666264446 | msg_id=1289 | preview='Ish olindi 1 chi yozgan odam'
+2026-03-20 20:13:48 | INFO     | main                 | ============================================================
+2026-03-20 20:13:48 | INFO     | main                 |   Korea Ish E'lonlari — Starting
+2026-03-20 20:13:48 | INFO     | main                 |   Accounts active: 2
+2026-03-20 20:13:48 | INFO     | main                 | ============================================================
+2026-03-20 20:13:48 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-20 20:13:48 | INFO     | bot.database         | [DB] Pruned 17 expired content_hashes rows
+2026-03-20 20:13:48 | INFO     | bot.database         | [DB] Pruned 3 old original_msg_index rows (keep_days=7)
+2026-03-20 20:13:48 | INFO     | bot.monitor          | [monitor] Connecting account 1 …
+2026-03-20 20:13:50 | INFO     | bot.monitor          | [monitor] Account 1 logged in as: quvonchbek (id=2046196282)
+2026-03-20 20:13:50 | INFO     | bot.monitor          | [monitor] Account 1 monitoring 55 group(s)
+2026-03-20 20:13:50 | INFO     | bot.monitor          | [monitor] Connecting account 2 …
+2026-03-20 20:13:52 | INFO     | bot.monitor          | [monitor] Account 2 logged in as: 무로토브 (id=8367892539)
+2026-03-20 20:13:52 | INFO     | bot.monitor          | [monitor] Account 2 monitoring 5 group(s)
+2026-03-20 20:13:52 | INFO     | bot.monitor          | [monitor] Target: Korea Ish E'lonlari (-1003744320676)
+2026-03-20 20:13:52 | INFO     | bot.monitor          | [monitor] 👂 Listening on 2 account(s) …
+2026-03-20 20:13:52 | INFO     | main                 | [main] Starting admin bot and scheduler …
+2026-03-20 20:13:52 | INFO     | main                 | [main] ✅ All systems running. Press Ctrl+C to stop.
+2026-03-20 20:13:52 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-20 20:13:52 | INFO     | bot.admin_bot        | [admin_bot] Starting admin bot …
+2026-03-20 20:13:52 | INFO     | bot.scheduler        | [scheduler] Daily summary scheduler started (fires at 21:00 KST).
+2026-03-20 20:13:52 | INFO     | bot.scheduler        | [scheduler] Next daily summary in 2768 seconds (at 2026-03-20 21:00 KST).
+2026-03-20 20:13:52 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002858032342 | msg_id=7215
+2026-03-20 20:13:52 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002858032342 | msg_id=7215 | preview='Rahmat'
+2026-03-20 20:14:26 | INFO     | bot.database         | [DB] Source group removed: -1001152680949
+2026-03-20 20:14:30 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002729014093 | msg_id=14165
+2026-03-20 20:14:30 | ERROR    | telethon.client.updates | Unhandled exception on _on_new_message
+Traceback (most recent call last):
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\telethon\client\updates.py", line 570, in _dispatch_update
+    await callback(event)
+  File "D:\VS Code\telegram_job_bot\bot\monitor.py", line 180, in _on_new_message
+    text = message.text or message.caption or message.raw_text or ""
+                           ^^^^^^^^^^^^^^^
+AttributeError: 'Message' object has no attribute 'caption'. Did you mean: 'action'?
+2026-03-20 20:14:33 | INFO     | bot.database         | [DB] Source group added: Help in Korea (-1001152680949) → account 1
+2026-03-20 20:14:38 | INFO     | bot.database         | [DB] Source group removed: -1002956231910
+2026-03-20 20:14:49 | INFO     | bot.database         | [DB] Source group removed: -1002466260830
+2026-03-20 20:15:17 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001470356319 | msg_id=117260
+2026-03-20 20:15:17 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001470356319 | msg_id=117260 | preview="Ertaga ansongda hayit namozi o'qiladimi kim biladi soatini,  joyini?"
+2026-03-20 20:15:17 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001470356319 | msg_id=117261
+2026-03-20 20:15:17 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001470356319 | msg_id=117261 | preview='Assalom alekum akalar Ertaga Ansongda Namoz qayerda uqiladi?'
+2026-03-20 20:15:17 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001470356319 | msg_id=117262
+2026-03-20 20:15:17 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001470356319 | msg_id=117262 | preview='6:30'
+2026-03-20 20:15:17 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001399984082 | msg_id=353796
+2026-03-20 20:15:17 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001399984082 | msg_id=353796 | preview='Assalomu ALEUM KIM\nKOREYAGA KETMOQCH BOLSA VIZAGA YORDAM KERAK BOLSA YORDAM BERA'
+2026-03-20 20:15:26 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002044373140 | msg_id=14707
+2026-03-20 20:15:26 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002044373140 | msg_id=14707 | preview='🔤🔤🔤🔤🔤🔤🔤🔤\n\n   🔤🔤🔤🔤🔤🔤🔤\n    \n🩸🅰️🩸🩸❓🅰️🩸🅰️\n🫵🩸🩸🩸🩸🅰️🩸🩸🩸\n23 mart dushanba\n2️⃣3️⃣ 🔤🔤🔤🔤\n🔤🔤'
+2026-03-20 20:15:26 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001754360080 | msg_id=25092
+2026-03-20 20:15:26 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001754360080 | msg_id=25092 | preview='🔤🔤🔤🔤🔤🔤🔤🔤\n\n   🔤🔤🔤🔤🔤🔤🔤\n    \n🩸🅰️🩸🩸❓🅰️🩸🅰️\n🫵🩸🩸🩸🩸🅰️🩸🩸🩸\n23 mart dushanba\n2️⃣3️⃣ 🔤🔤🔤🔤\n🔤🔤'
