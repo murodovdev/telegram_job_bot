@@ -771,11 +771,11 @@ async def cb_review(callback: CallbackQuery):
         author_part = f'<a href="{_html.escape(author_link)}">{safe_author}</a>' if author_link else safe_author
 
         formatted = (
-            f"⚠️ <b>Yangi ish e'loni:</b>\n"
-            f"Guruh: {group_part}\n"
-            f"Muallif: {author_part}\n"
-            f"Vaqt: {time_str}\n\n"
-            f"Xabar matni:\n"
+            f"⚠️ <b>Yangi ish e'loni:</b>\n\n"
+            f"<b>Guruh:</b> {group_part}\n"
+            f"<b>Muallif:</b> {author_part}\n"
+            f"<b>Vaqt:</b> {time_str}\n\n"
+            f"<b>Xabar matni:</b>\n"
             f"{safe_text}"
         )
 
