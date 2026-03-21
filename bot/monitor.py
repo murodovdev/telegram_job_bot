@@ -95,7 +95,12 @@ async def _send_to_review(
         msg_time=msg_time,
     )
 
-    source_label = "🔑 Kalit so'z" if haram_source == "keyword" else "🤖 Groq AI"
+    if haram_source == "keyword":
+        source_label = "🔑 Kalit so'z"
+    elif haram_source == "groq_unclear":
+        source_label = "🤔 Groq AI (noaniq)"
+    else:
+        source_label = "🤖 Groq AI"
     preview = text[:400] + ("…" if len(text) > 400 else "")
 
     import html as _html
@@ -352,18 +357,20 @@ def _make_message_handler(assigned_client, account_num: int):
         # Semaphore bilan rate limit nazorat qilinadi — bir vaqtda max 3 ta so'rov.
         async with _groq_semaphore:
             groq_result = await check_halal_with_groq(text)
-        if not groq_result.api_error and groq_result.verdict == "haram":
+        if not groq_result.api_error and groq_result.verdict in ("haram", "unclear"):
+            verdict_label = "harom" if groq_result.verdict == "haram" else "noaniq"
             logger.info(
-                "[monitor/acct%s] HARAM (groq) | reason=%s | "
-                "chat_id=%s | msg_id=%s",
-                account_num, groq_result.reason, chat_id, msg_id,
+                "[monitor/acct%s] GROQ=%s | reason=%s | chat_id=%s | msg_id=%s",
+                account_num, groq_result.verdict, groq_result.reason, chat_id, msg_id,
             )
+            # Ikkalasi ham adminga yuboriladi — admin qaror qiladi.
+            # haram_source field uchun verdict ni saqlaymiz (groq_haram / groq_unclear)
             sent = await _send_to_review(
                 text=text,
                 source_chat=chat_id,
                 source_msg=msg_id,
-                haram_reason=groq_result.reason or "AI tomonidan harom deb topildi",
-                haram_source="groq",
+                haram_reason=groq_result.reason or f"AI natijasi: {verdict_label}",
+                haram_source=f"groq_{groq_result.verdict}",
                 group_title=_pre_group_title,
                 group_link=_pre_group_link,
                 author_name=_pre_author_name,
