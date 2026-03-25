@@ -49,6 +49,30 @@ from bot.utils import (
 
 logger = logging.getLogger(__name__)
 
+# ── "Odam olindi" kalit so'zlar ──────────────────────────────────
+# Manba guruhda ish e'loniga reply yoki edit orqali kelganda
+# target guruhda post "ODAM OLINDI" deb edit qilinadi.
+_FILLED_KEYWORDS: list = [
+    # O'zbekcha
+    "odam olindi", "olindi", "band bo'ldi", "band boldi", "to'ldi", "toldi",
+    "tugadi", "yopildi", "ishchi topildi", "aktual emas", "kerak emas",
+    "olingan", "band", "topildi", "yopilyapti", "bitdi",
+    # Ruscha
+    "взяли", "занято", "нашли", "закрыто", "не актуально", "нашли человека",
+    "место занято", "уже нашли", "закрыта", "набрали",
+    # Koreys
+    "채용완료", "마감", "충원완료", "구했어요", "채용됐어요", "마감됐어요",
+    "뽑았어요", "완료", "마감입니다",
+]
+
+def _is_filled_signal(text: str) -> bool:
+    """Matn 'odam olindi' signalimi tekshiradi."""
+    if not text:
+        return False
+    low = text.lower()
+    return any(kw in low for kw in _FILLED_KEYWORDS)
+
+
 # ── Review queue sender ───────────────────────────────────────────
 # Harom deb topilgan ish e'lonini admin botga yuboradi.
 # Yuborish uchun aiogram Bot instance lazim — admin_bot.py dan olinadi.
@@ -489,6 +513,20 @@ def _make_message_handler(assigned_client, account_num: int):
                 # a failed send never permanently blacklists content.
                 if DEDUP_WINDOW_HOURS > 0:
                     db.record_content_hash(text, source_chat=chat_id, source_msg=msg_id)
+                # "Odam olindi" feature: target_msg_id ni DB ga saqlaymiz.
+                # Keyinroq reply/edit kelganda shu ID orqali postni topamiz.
+                try:
+                    sent_msgs = await assigned_client.get_messages(target, limit=1)
+                    if sent_msgs:
+                        db.save_forwarded_msg(
+                            source_chat=chat_id,
+                            source_msg=msg_id,
+                            target_chat=target,
+                            target_msg_id=sent_msgs[0].id,
+                            post_text=post_text,
+                        )
+                except Exception as _exc:
+                    logger.warning("[monitor] Could not save forwarded_msg id: %s", _exc)
                 logger.info(
                     "[monitor/acct%s] ✅ FORWARDED | chat=%s | msg=%s → target=%s",
                     account_num, chat_id, msg_id, target,
@@ -565,6 +603,128 @@ async def _on_chat_action(event: events.ChatAction.Event) -> None:
         )
 
 
+# ── Handler 3: "Odam olindi" — reply yoki edit orqali ────────────
+#
+# Ikkita holat kuzatiladi:
+#   A) Manba guruhda ish e'loniga kimdir reply qilib "odam olindi" desa
+#   B) Ish beruvchi o'z xabarini edit qilib matniga "odam olindi" qo'shsa
+#
+# Ikkalasida ham target guruhda yuborilgan forward postga
+# "🔴 ODAM OLINDI" qo'shimcha qo'yiladi (edit orqali).
+
+async def _mark_filled_in_target(
+    assigned_client,
+    source_chat: int,
+    source_msg: int,
+) -> None:
+    """
+    DB dan target_msg_id ni topib, target guruhda o'sha postni edit qiladi.
+    Telegram 48 soatdan eski xabarlarni edit qilmaydi — bu holda log yozadi.
+    """
+    record = db.get_forwarded_msg(source_chat, source_msg)
+    if not record:
+        logger.debug(
+            "[monitor] filled signal — source msg not in forwarded_msgs "
+            "source_chat=%s source_msg=%s", source_chat, source_msg
+        )
+        return
+
+    target_chat   = record["target_chat"]
+    target_msg_id = record["target_msg_id"]
+    old_text      = record["post_text"] or ""
+
+    # Eski matnning oxiriga "ODAM OLINDI" separator qo'shamiz
+    separator = "\n\n─────────────────\n🔴 <b>ODAM OLINDI</b>"
+    if "ODAM OLINDI" in old_text:
+        logger.debug("[monitor] Already marked filled: target_msg_id=%s", target_msg_id)
+        return
+
+    new_text = old_text + separator
+
+    try:
+        await assigned_client.edit_message(
+            entity=target_chat,
+            message=target_msg_id,
+            text=new_text,
+            parse_mode="html",
+            link_preview=False,
+        )
+        logger.info(
+            "[monitor] 🔴 ODAM OLINDI marked | source_chat=%s source_msg=%s → target_msg=%s",
+            source_chat, source_msg, target_msg_id,
+        )
+    except Exception as exc:
+        err_str = str(exc)
+        if "MESSAGE_EDIT_TIME_EXPIRED" in err_str or "edit" in err_str.lower():
+            logger.info(
+                "[monitor] Cannot edit — message too old (>48h) | target_msg_id=%s",
+                target_msg_id,
+            )
+        else:
+            logger.warning(
+                "[monitor] Failed to edit filled message %s: %s",
+                target_msg_id, exc,
+            )
+
+
+def _make_filled_handlers(assigned_client, account_num: int):
+    """
+    Ikkita event handler qaytaradi:
+      1. on_reply  — ish e'loniga "odam olindi" deb reply qilinsa
+      2. on_edited — ish e'loni tahrirlansa va "odam olindi" qo'shilsa
+    """
+    async def _on_reply(event: events.NewMessage.Event) -> None:
+        """Kimdir source guruhda ish e'loniga reply qildi."""
+        message = event.message
+        chat_id = event.chat_id
+
+        # Faqat kuzatilayotgan manba guruhlardan
+        if chat_id not in db.get_source_group_ids_cached(account=account_num):
+            return
+
+        # Faqat reply bo'lsa
+        if not message.reply_to_msg_id:
+            return
+
+        text = message.text or message.caption or ""
+        if not _is_filled_signal(text):
+            return
+
+        logger.info(
+            "[monitor/acct%s] FILLED signal (reply) | chat=%s replied_to=%s",
+            account_num, chat_id, message.reply_to_msg_id,
+        )
+        await _mark_filled_in_target(
+            assigned_client=assigned_client,
+            source_chat=chat_id,
+            source_msg=message.reply_to_msg_id,
+        )
+
+    async def _on_edited(event: events.MessageEdited.Event) -> None:
+        """Ish beruvchi o'z xabarini edit qildi."""
+        message = event.message
+        chat_id = event.chat_id
+
+        if chat_id not in db.get_source_group_ids_cached(account=account_num):
+            return
+
+        text = message.text or message.caption or ""
+        if not _is_filled_signal(text):
+            return
+
+        logger.info(
+            "[monitor/acct%s] FILLED signal (edit) | chat=%s msg=%s",
+            account_num, chat_id, message.id,
+        )
+        await _mark_filled_in_target(
+            assigned_client=assigned_client,
+            source_chat=chat_id,
+            source_msg=message.id,
+        )
+
+    return _on_reply, _on_edited
+
+
 # ── Public API ────────────────────────────────────────────────────
 
 async def setup_monitor() -> None:
@@ -586,6 +746,11 @@ async def setup_monitor() -> None:
         # Register the account-specific message handler
         handler = _make_message_handler(client, account_num)
         client.add_event_handler(handler, events.NewMessage())
+
+        # "Odam olindi" handlerlarini ro'yxatdan o'tkazish
+        on_reply, on_edited = _make_filled_handlers(client, account_num)
+        client.add_event_handler(on_reply,  events.NewMessage())
+        client.add_event_handler(on_edited, events.MessageEdited())
 
         groups = db.list_source_groups(account=account_num)
         logger.info(

@@ -149,6 +149,26 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_ch_hash ON content_hashes (text_hash);
             CREATE INDEX IF NOT EXISTS idx_ch_time ON content_hashes (seen_at);
 
+            -- forwarded_msgs: har forward qilingan post uchun
+            -- (source_chat, source_msg) → target_msg_id mapping.
+            -- "Odam olindi" feature: manba guruhda reply/edit kelganda
+            -- target guruhda tegishli postni topib edit qilish uchun ishlatiladi.
+            -- 48 soatdan eski yozuvlar tozalanadi (Telegram edit limiti).
+            CREATE TABLE IF NOT EXISTS forwarded_msgs (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_chat    INTEGER NOT NULL,
+                source_msg     INTEGER NOT NULL,
+                target_chat    INTEGER NOT NULL,
+                target_msg_id  INTEGER NOT NULL,
+                post_text      TEXT    NOT NULL DEFAULT '',
+                forwarded_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+                UNIQUE (source_chat, source_msg)
+            );
+            CREATE INDEX IF NOT EXISTS idx_fwd_source
+                ON forwarded_msgs (source_chat, source_msg);
+            CREATE INDEX IF NOT EXISTS idx_fwd_time
+                ON forwarded_msgs (forwarded_at);
+
             -- Halal review queue: harom deb topilgan ish e'lonlari admin
             -- tasdiqlashini kutadi. Admin "Tasdiqlash" bosganda guruhga yuboriladi,
             -- "Rad etish" bosganda o'chiriladi.
@@ -907,6 +927,65 @@ def clear_all_stats() -> int:
 
 
 # ── Halal review queue ────────────────────────────────────────────
+
+# ── Forwarded messages index ─────────────────────────────────────
+# "Odam olindi" feature uchun: manba guruhdagi xabar → target guruhdagi
+# forward qilingan xabar mapping.
+
+def save_forwarded_msg(
+    source_chat: int,
+    source_msg: int,
+    target_chat: int,
+    target_msg_id: int,
+    post_text: str = "",
+) -> None:
+    """
+    Forward qilingan xabarni DB ga saqlaydi.
+    UNIQUE constraint: bir xil (source_chat, source_msg) uchun
+    ikkinchi marta kelsa yangilanadi.
+    """
+    with _connection() as conn:
+        conn.execute(
+            """INSERT INTO forwarded_msgs
+               (source_chat, source_msg, target_chat, target_msg_id, post_text)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(source_chat, source_msg) DO UPDATE SET
+                   target_msg_id = excluded.target_msg_id,
+                   post_text     = excluded.post_text,
+                   forwarded_at  = datetime('now')""",
+            (source_chat, source_msg, target_chat, target_msg_id, post_text),
+        )
+
+
+def get_forwarded_msg(source_chat: int, source_msg: int) -> Optional[dict]:
+    """
+    Manba (chat_id, msg_id) bo'yicha target msg_id ni qaytaradi.
+    Topilmasa None.
+    """
+    with _connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM forwarded_msgs WHERE source_chat=? AND source_msg=?",
+            (source_chat, source_msg),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def cleanup_forwarded_msgs(keep_hours: int = 48) -> int:
+    """
+    48 soatdan eski forwarded_msgs yozuvlarini o'chiradi.
+    Telegram 48 soatdan keyin edit qilishga ruxsat bermaydi —
+    eski yozuvlarni saqlashning ma'nosi yo'q.
+    """
+    with _connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM forwarded_msgs WHERE forwarded_at < datetime('now', ?)",
+            (f"-{keep_hours} hours",),
+        )
+        deleted = cursor.rowcount
+    if deleted:
+        logger.info("[DB] Pruned %d old forwarded_msgs rows", deleted)
+    return deleted
+
 
 def add_to_review_queue(
     source_chat: int,
