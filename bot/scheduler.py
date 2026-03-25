@@ -89,6 +89,7 @@ async def run_daily_summary_scheduler() -> None:
             db.cleanup_processed_msgs(keep_days=30)
             db.cleanup_original_msg_index(keep_days=7)
             db.cleanup_review_queue(keep_hours=48)
+            db.cleanup_forwarded_msgs(keep_hours=48)
         except Exception as exc:
             logger.error("[scheduler] Error sending daily summary: %s", exc)
 
