@@ -74,6 +74,7 @@ Qat’iy qaror ustuvorligi:
 2. Agar ish toza ekani aniq va yetarli ma’lumot bilan isbotlansa -> "halol"
 3. Qolgan barcha holatlarda -> "unclear"
 
+
 "halol" faqat quyidagi holatda beriladi:
 - ish vazifasi aniq yozilgan bo‘lsa
 - mahsulot/xizmat turi aniq yozilgan bo‘lsa
