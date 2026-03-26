@@ -54,9 +54,9 @@ logger = logging.getLogger(__name__)
 # target guruhda post "ODAM OLINDI" deb edit qilinadi.
 _FILLED_KEYWORDS: list = [
     # O'zbekcha
-    "odam olindi", "olindi", "band bo'ldi", "band boldi", "to'ldi", "toldi",
+    "odam olindi", "olindi", "olind", "band bo'ldi", "band boldi", "to'ldi", "toldi",
     "tugadi", "yopildi", "ishchi topildi", "aktual emas", "kerak emas",
-    "olingan", "band", "topildi", "yopilyapti", "bitdi",
+    "olingan", "band", "topildi", "yopilyapti", "bitdi", "Ishga olindi"
     # Ruscha
     "взяли", "занято", "нашли", "закрыто", "не актуально", "нашли человека",
     "место занято", "уже нашли", "закрыта", "набрали",
