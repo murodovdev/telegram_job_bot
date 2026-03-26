@@ -153,7 +153,7 @@ async def _send_to_review(
     )
 
     notify_text = (
-        f"⚠️ <b>Harom deb topilgan ish e'loni</b>\n\n"
+        f"⚠️ <b>Tekshirish kerak bo'lgan ish e'loni</b>\n\n"
         f"<b>Guruh:</b> {_group_part}\n"
         f"<b>Muallif:</b> {_author_part}\n"
         f"<b>Vaqt:</b> {time_display}\n\n"
