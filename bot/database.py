@@ -158,6 +158,7 @@ def init_db() -> None:
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_chat    INTEGER NOT NULL,
                 source_msg     INTEGER NOT NULL,
+                sender_id      INTEGER,
                 target_chat    INTEGER NOT NULL,
                 target_msg_id  INTEGER NOT NULL,
                 post_text      TEXT    NOT NULL DEFAULT '',
@@ -166,6 +167,8 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_fwd_source
                 ON forwarded_msgs (source_chat, source_msg);
+            CREATE INDEX IF NOT EXISTS idx_fwd_sender
+                ON forwarded_msgs (source_chat, sender_id);
             CREATE INDEX IF NOT EXISTS idx_fwd_time
                 ON forwarded_msgs (forwarded_at);
 
@@ -199,6 +202,15 @@ def init_db() -> None:
             logger.info("[DB] Migrated: added assigned_account column")
         except sqlite3.OperationalError:
             pass  # column already exists — normal on subsequent startups
+
+        # Migrate forwarded_msgs — add sender_id if missing
+        try:
+            conn.execute(
+                "ALTER TABLE forwarded_msgs ADD COLUMN sender_id INTEGER"
+            )
+            logger.info("[DB] Migrated: added sender_id to forwarded_msgs")
+        except sqlite3.OperationalError:
+            pass
 
         # Migrate halal_review_queue — add metadata columns if missing
         for col, definition in [
@@ -938,23 +950,44 @@ def save_forwarded_msg(
     target_chat: int,
     target_msg_id: int,
     post_text: str = "",
+    sender_id: Optional[int] = None,
 ) -> None:
     """
     Forward qilingan xabarni DB ga saqlaydi.
+    sender_id: ish beruvchining Telegram user ID si — reply bo'lmagan
+               "odam olindi" holatida so'nggi postini topish uchun ishlatiladi.
     UNIQUE constraint: bir xil (source_chat, source_msg) uchun
     ikkinchi marta kelsa yangilanadi.
     """
     with _connection() as conn:
         conn.execute(
             """INSERT INTO forwarded_msgs
-               (source_chat, source_msg, target_chat, target_msg_id, post_text)
-               VALUES (?, ?, ?, ?, ?)
+               (source_chat, source_msg, sender_id, target_chat, target_msg_id, post_text)
+               VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(source_chat, source_msg) DO UPDATE SET
+                   sender_id     = excluded.sender_id,
                    target_msg_id = excluded.target_msg_id,
                    post_text     = excluded.post_text,
                    forwarded_at  = datetime('now')""",
-            (source_chat, source_msg, target_chat, target_msg_id, post_text),
+            (source_chat, source_msg, sender_id, target_chat, target_msg_id, post_text),
         )
+
+
+def get_last_forwarded_by_sender(source_chat: int, sender_id: int) -> Optional[dict]:
+    """
+    Shu guruhda o'sha sender_id dan eng oxirgi forward qilingan postni qaytaradi.
+    Reply bo'lmagan 'odam olindi' holatida ishlatiladi:
+    xabar yozgan odam kim? → uning so'nggi ish e'loni qaysi?
+    Topilmasa None.
+    """
+    with _connection() as conn:
+        row = conn.execute(
+            """SELECT * FROM forwarded_msgs
+               WHERE source_chat = ? AND sender_id = ?
+               ORDER BY forwarded_at DESC LIMIT 1""",
+            (source_chat, sender_id),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def get_forwarded_msg(source_chat: int, source_msg: int) -> Optional[dict]:
