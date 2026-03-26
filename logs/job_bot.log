@@ -3057,3 +3057,39 @@ AttributeError: 'Message' object has no attribute 'caption'. Did you mean: 'acti
 2026-03-20 22:47:35 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001503748476 | msg_id=79854 | preview='Ha tagidagi manzilda'
 2026-03-20 22:47:38 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002729014093 | msg_id=14178
 2026-03-20 22:47:38 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002729014093 | msg_id=14178 | preview='Продам сим- карты\nКому интересно пишите \nФиз. Сим-карты\n\nВ наличии более 100+ шт'
+2026-03-26 12:06:08 | INFO     | main                 | ============================================================
+2026-03-26 12:06:08 | INFO     | main                 |   Korea Ish E'lonlari — Starting
+2026-03-26 12:06:08 | INFO     | main                 |   Accounts active: 2
+2026-03-26 12:06:08 | INFO     | main                 | ============================================================
+2026-03-26 12:06:08 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-26 12:06:08 | INFO     | bot.monitor          | [monitor] Connecting account 1 …
+2026-03-26 12:06:10 | INFO     | bot.monitor          | [monitor] Account 1 logged in as: quvonchbek (id=2046196282)
+2026-03-26 12:06:10 | INFO     | bot.monitor          | [monitor] Account 1 monitoring 52 group(s)
+2026-03-26 12:06:10 | INFO     | bot.monitor          | [monitor] Connecting account 2 …
+2026-03-26 12:06:12 | INFO     | bot.monitor          | [monitor] Account 2 logged in as: 무로토브 (id=8367892539)
+2026-03-26 12:06:12 | INFO     | bot.monitor          | [monitor] Account 2 monitoring 6 group(s)
+2026-03-26 12:06:12 | INFO     | bot.monitor          | [monitor] Target: Korea Ish E'lonlari (-1003744320676)
+2026-03-26 12:06:12 | INFO     | bot.monitor          | [monitor] 👂 Listening on 2 account(s) …
+2026-03-26 12:06:12 | INFO     | main                 | [main] Starting admin bot and scheduler …
+2026-03-26 12:06:12 | INFO     | main                 | [main] ✅ All systems running. Press Ctrl+C to stop.
+2026-03-26 12:06:12 | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-03-26 12:06:12 | INFO     | bot.admin_bot        | [admin_bot] Starting admin bot …
+2026-03-26 12:06:12 | INFO     | bot.scheduler        | [scheduler] Daily summary scheduler started (fires at 21:00 KST).
+2026-03-26 12:06:12 | INFO     | bot.scheduler        | [scheduler] Next daily summary in 32027 seconds (at 2026-03-26 21:00 KST).
+2026-03-26 12:06:37 | INFO     | bot.monitor          | [monitor/acct2] SOURCE GROUP HIT | chat_id=-1002000748619 | msg_id=25455
+2026-03-26 12:06:38 | WARNING  | bot.groq_halal       | [groq_halal] API error 429: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kjd59e4ketja0nr6sspn2bbn` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 98781,
+2026-03-26 12:06:38 | INFO     | bot.monitor          | [monitor/acct2] ✅ JOB DETECTED | chat=-1002000748619 | msg=25455 | lang=uzbek | kw=['ish bor']
+2026-03-26 12:06:39 | INFO     | bot.monitor          | [monitor/acct2] ✅ FORWARDED | chat=-1002000748619 | msg=25455 → target=-1003744320676
+2026-03-26 12:07:05 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002603723162 | msg_id=26766
+2026-03-26 12:07:07 | WARNING  | bot.groq_halal       | [groq_halal] API error 429: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kjd59e4ketja0nr6sspn2bbn` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 98748,
+2026-03-26 12:07:07 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (content duplicate) | exact duplicate of msg 25455 in chat -1002000748619 | chat_id=-1002603723162 | msg_id=26766
+2026-03-26 12:08:53 | WARNING  | bot.database         | [DB] Source group already exists: -1001503748476
+2026-03-26 12:08:53 | INFO     | bot.database         | [DB] Group -1001503748476 reassigned to account 2 (stored as -1001503748476)
+2026-03-26 12:08:53 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002043977934 | msg_id=25350
+2026-03-26 12:08:53 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002043977934 | msg_id=25350 | preview='Ассалому алекум\n\n1 апрель узбдан учамиз \n\n3 апрель кареядан Учамиз \n\nтошкент фар'
+2026-03-26 12:09:32 | INFO     | bot.database         | [DB] User blocked: Korea Gold Visa (7928691791)
+2026-03-26 12:09:55 | INFO     | bot.monitor          | [monitor] 🗑️  Deleting service message | user=Bekzodbek | msg_id=7277
+2026-03-26 12:10:16 | INFO     | main                 | [main] Shutting down …
+2026-03-26 12:10:17 | INFO     | main                 | [main] Stopped.
+2026-03-26 12:10:17 | ERROR    | asyncio              | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001465A0FB770>
