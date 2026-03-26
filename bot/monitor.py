@@ -381,10 +381,11 @@ def _make_message_handler(assigned_client, account_num: int):
         # Semaphore bilan rate limit nazorat qilinadi — bir vaqtda max 3 ta so'rov.
         async with _groq_semaphore:
             groq_result = await check_halal_with_groq(text)
-        if not groq_result.api_error and groq_result.verdict == "haram":
+        if not groq_result.api_error and groq_result.verdict in ("haram", "unclear"):
+            verdict_label = "harom" if groq_result.verdict == "haram" else "noaniq"
             logger.info(
-             "[monitor/acct%s] GROQ=%s | reason=%s | chat_id=%s | msg_id=%s",
-             account_num, groq_result.verdict, groq_result.reason, chat_id, msg_id,
+                "[monitor/acct%s] GROQ=%s | reason=%s | chat_id=%s | msg_id=%s",
+                account_num, groq_result.verdict, groq_result.reason, chat_id, msg_id,
             )
             # Ikkalasi ham adminga yuboriladi — admin qaror qiladi.
             # haram_source field uchun verdict ni saqlaymiz (groq_haram / groq_unclear)
@@ -392,7 +393,7 @@ def _make_message_handler(assigned_client, account_num: int):
                 text=text,
                 source_chat=chat_id,
                 source_msg=msg_id,
-                haram_reason=groq_result.reason or f"AI natijasi:",
+                haram_reason=groq_result.reason or f"AI natijasi: {verdict_label}",
                 haram_source=f"groq_{groq_result.verdict}",
                 group_title=_pre_group_title,
                 group_link=_pre_group_link,
@@ -523,6 +524,7 @@ def _make_message_handler(assigned_client, account_num: int):
                             target_chat=target,
                             target_msg_id=sent_msgs[0].id,
                             post_text=post_text,
+                            sender_id=message.sender_id,
                         )
                 except Exception as _exc:
                     logger.warning("[monitor] Could not save forwarded_msg id: %s", _exc)
@@ -721,7 +723,54 @@ def _make_filled_handlers(assigned_client, account_num: int):
             source_msg=message.id,
         )
 
-    return _on_reply, _on_edited
+    async def _on_no_reply(event: events.NewMessage.Event) -> None:
+        """
+        Reply bo'lmagan holat: ish beruvchining o'zi guruhda shunchaki
+        'odam olindi' deb yozadi. Sender ID orqali uning guruhda
+        eng so'nggi forward qilingan postini topib edit qilamiz.
+        """
+        message = event.message
+        chat_id = event.chat_id
+
+        # Faqat kuzatilayotgan manba guruhlardan
+        if chat_id not in db.get_source_group_ids_cached(account=account_num):
+            return
+
+        # Reply bo'lmagan holat — reply bo'lsa _on_reply handler oladi
+        if message.reply_to_msg_id:
+            return
+
+        text = message.text or message.caption or ""
+        if not _is_filled_signal(text):
+            return
+
+        sender_id = message.sender_id
+        if not sender_id:
+            return
+
+        # O'sha sender_id dan shu guruhda eng oxirgi forward qilingan post
+        record = db.get_last_forwarded_by_sender(
+            source_chat=chat_id,
+            sender_id=sender_id,
+        )
+        if not record:
+            logger.debug(
+                "[monitor/acct%s] FILLED no-reply — no recent post found for sender=%s chat=%s",
+                account_num, sender_id, chat_id,
+            )
+            return
+
+        logger.info(
+            "[monitor/acct%s] FILLED signal (no-reply) | sender=%s → last post source_msg=%s",
+            account_num, sender_id, record["source_msg"],
+        )
+        await _mark_filled_in_target(
+            assigned_client=assigned_client,
+            source_chat=chat_id,
+            source_msg=record["source_msg"],
+        )
+
+    return _on_reply, _on_edited, _on_no_reply
 
 
 # ── Public API ────────────────────────────────────────────────────
@@ -747,9 +796,10 @@ async def setup_monitor() -> None:
         client.add_event_handler(handler, events.NewMessage())
 
         # "Odam olindi" handlerlarini ro'yxatdan o'tkazish
-        on_reply, on_edited = _make_filled_handlers(client, account_num)
-        client.add_event_handler(on_reply,  events.NewMessage())
-        client.add_event_handler(on_edited, events.MessageEdited())
+        on_reply, on_edited, on_no_reply = _make_filled_handlers(client, account_num)
+        client.add_event_handler(on_reply,    events.NewMessage())
+        client.add_event_handler(on_no_reply, events.NewMessage())
+        client.add_event_handler(on_edited,   events.MessageEdited())
 
         groups = db.list_source_groups(account=account_num)
         logger.info(
