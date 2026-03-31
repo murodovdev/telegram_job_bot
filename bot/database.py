@@ -189,6 +189,13 @@ def init_db() -> None:
                 msg_time     TEXT    NOT NULL DEFAULT '',
                 created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
             );
+            -- bot_settings: generic key-value store for runtime configuration.
+            -- Used for features like the AI filter toggle that need to survive restarts.
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
         """)
 
         # ── Safe migrations ───────────────────────────────────────
@@ -1081,3 +1088,76 @@ def cleanup_review_queue(keep_hours: int = 48) -> int:
     if deleted:
         logger.info("[DB] Pruned %d old review_queue rows", deleted)
     return deleted
+
+# ── Bot settings (runtime configuration) ─────────────────────────
+#
+# A simple key-value store that persists across restarts.
+# Values are stored as strings; callers handle type conversion.
+#
+# AI filter toggle key: "ai_filter_enabled"
+#   "1" = enabled (default), "0" = disabled
+
+_AI_FILTER_KEY = "ai_filter_enabled"
+
+# In-memory cache for the AI filter flag — avoids a DB read on every
+# message. Invalidated immediately when set_setting() is called.
+_ai_filter_cache: Optional[bool] = None
+
+
+def get_setting(key: str, default: str = "") -> str:
+    """Return the stored value for *key*, or *default* if not found."""
+    with _connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM bot_settings WHERE key = ?", (key,)
+        ).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    """Upsert a key-value pair into bot_settings."""
+    global _ai_filter_cache
+    with _connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO bot_settings (key, value, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(key) DO UPDATE
+              SET value = excluded.value,
+                  updated_at = excluded.updated_at
+            """,
+            (key, value),
+        )
+    # Invalidate the AI-filter in-memory cache if this key changed it.
+    if key == _AI_FILTER_KEY:
+        _ai_filter_cache = None
+    logger.info("[DB] Setting updated: %s = %s", key, value)
+
+
+def is_ai_filter_enabled() -> bool:
+    """
+    Return True if the Groq AI halal filter is currently enabled.
+
+    Defaults to True (enabled) if the setting has never been written.
+    Uses a module-level cache so monitor.py never hits SQLite on the
+    hot path — the cache is only invalidated when set_setting() is called.
+    """
+    global _ai_filter_cache
+    if _ai_filter_cache is None:
+        raw = get_setting(_AI_FILTER_KEY, default="1")
+        _ai_filter_cache = raw != "0"
+    return _ai_filter_cache
+
+
+def toggle_ai_filter() -> bool:
+    """
+    Flip the AI filter state.  Returns the NEW state (True = enabled).
+    """
+    current = is_ai_filter_enabled()
+    new_state = not current
+    set_setting(_AI_FILTER_KEY, "1" if new_state else "0")
+    logger.info(
+        "[DB] AI filter toggled: %s → %s",
+        "ON" if current else "OFF",
+        "ON" if new_state else "OFF",
+    )
+    return new_state

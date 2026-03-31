@@ -175,7 +175,7 @@ async def safe_send_message(
     client: TelegramClient,
     target,
     text: str,
-) -> bool:
+) -> Optional[Message]:
     """
     Send a message in HTML parse mode with intelligent retry logic.
 
@@ -186,14 +186,15 @@ async def safe_send_message(
         Retrying before the wait expires always fails again and wastes the
         retry budget. FloodWait does NOT consume a retry attempt — after
         sleeping the required time we try again on top of the normal budget.
-        (The old loop-based approach counted FloodWait as a failed attempt,
-        so if it hit on attempt 3 we would sleep correctly but then exit the
-        loop and return False without actually retrying.)
 
     All other errors — network hiccups, temporary server errors, etc.
         Use exponential back-off (5s, 10s) before retrying.
 
-    Returns True on success, False after all retries are exhausted.
+    Returns the sent Message object on success, None after all retries are
+    exhausted. Returning the Message directly (instead of a bool) lets the
+    caller record target_msg_id from sent_msg.id without an extra
+    get_messages() round-trip — which was both slow (~300 ms) and racey
+    (another message landing between send and get could give the wrong ID).
     """
     from telethon.errors import FloodWaitError
 
@@ -201,13 +202,13 @@ async def safe_send_message(
     while attempt < MAX_RETRIES:
         attempt += 1
         try:
-            await client.send_message(
+            sent = await client.send_message(
                 target,
                 text,
                 parse_mode="html",
                 link_preview=False,
             )
-            return True
+            return sent  # Message object — caller can read .id directly
 
         except FloodWaitError as e:
             # Telegram gave us the exact number of seconds we must wait.
@@ -234,7 +235,7 @@ async def safe_send_message(
         "[utils] All %d send attempts to %s failed — message dropped.",
         MAX_RETRIES, target,
     )
-    return False
+    return None
 
 
 # ── Misc ──────────────────────────────────────────────────────────
