@@ -378,32 +378,45 @@ def _make_message_handler(assigned_client, account_num: int):
             return
 
         # ── 5.3 Groq AI halal check ───────────────────────────────
-        # Semaphore bilan rate limit nazorat qilinadi — bir vaqtda max 3 ta so'rov.
-        async with _groq_semaphore:
-            groq_result = await check_halal_with_groq(text)
-        if not groq_result.api_error and groq_result.verdict in ("haram", "unclear"):
-            verdict_label = "harom" if groq_result.verdict == "haram" else "noaniq"
-            logger.info(
-                "[monitor/acct%s] GROQ=%s | reason=%s | chat_id=%s | msg_id=%s",
-                account_num, groq_result.verdict, groq_result.reason, chat_id, msg_id,
+        # Only runs when the AI filter is enabled (admin can toggle it off).
+        # When disabled the step is skipped entirely — no network call, no
+        # delay. The cached db.is_ai_filter_enabled() read is O(1) and never
+        # hits SQLite on the hot path.
+        #
+        # When enabled: semaphore limits concurrent requests to 3 (free-tier
+        # Groq allows ~30/min; 3 parallel gives headroom without bursting).
+        if db.is_ai_filter_enabled():
+            async with _groq_semaphore:
+                groq_result = await check_halal_with_groq(text)
+            if not groq_result.api_error and groq_result.verdict in ("haram", "unclear"):
+                verdict_label = "harom" if groq_result.verdict == "haram" else "noaniq"
+                logger.info(
+                    "[monitor/acct%s] GROQ=%s | reason=%s | chat_id=%s | msg_id=%s",
+                    account_num, groq_result.verdict, groq_result.reason, chat_id, msg_id,
+                )
+                # Ikkalasi ham adminga yuboriladi — admin qaror qiladi.
+                # haram_source field uchun verdict ni saqlaymiz (groq_haram / groq_unclear)
+                sent = await _send_to_review(
+                    text=text,
+                    source_chat=chat_id,
+                    source_msg=msg_id,
+                    haram_reason=groq_result.reason or f"AI natijasi: {verdict_label}",
+                    haram_source=f"groq_{groq_result.verdict}",
+                    group_title=_pre_group_title,
+                    group_link=_pre_group_link,
+                    author_name=_pre_author_name,
+                    author_link=_pre_author_link,
+                    msg_time=_pre_msg_time_str,
+                )
+                if sent:
+                    db.mark_processed(chat_id, msg_id)
+                return
+        else:
+            logger.debug(
+                "[monitor/acct%s] AI filter DISABLED — skipping Groq check | "
+                "chat_id=%s | msg_id=%s",
+                account_num, chat_id, msg_id,
             )
-            # Ikkalasi ham adminga yuboriladi — admin qaror qiladi.
-            # haram_source field uchun verdict ni saqlaymiz (groq_haram / groq_unclear)
-            sent = await _send_to_review(
-                text=text,
-                source_chat=chat_id,
-                source_msg=msg_id,
-                haram_reason=groq_result.reason or f"AI natijasi: {verdict_label}",
-                haram_source=f"groq_{groq_result.verdict}",
-                group_title=_pre_group_title,
-                group_link=_pre_group_link,
-                author_name=_pre_author_name,
-                author_link=_pre_author_link,
-                msg_time=_pre_msg_time_str,
-            )
-            if sent:
-                db.mark_processed(chat_id, msg_id)
-            return
 
         # ── 5.5 Content duplicate gate ────────────────────────────
         # Catches copy-paste spam: the same (or nearly identical) job listing
@@ -505,32 +518,35 @@ def _make_message_handler(assigned_client, account_num: int):
         )
 
         try:
-            success = await safe_send_message(assigned_client, target, post_text)
+            sent_msg = await safe_send_message(assigned_client, target, post_text)
 
-            if success:
+            if sent_msg:
                 db.mark_processed(chat_id, msg_id)
                 # Register content fingerprint AFTER successful send so that
                 # a failed send never permanently blacklists content.
                 if DEDUP_WINDOW_HOURS > 0:
                     db.record_content_hash(text, source_chat=chat_id, source_msg=msg_id)
                 # "Odam olindi" feature: target_msg_id ni DB ga saqlaymiz.
-                # Keyinroq reply/edit kelganda shu ID orqali postni topamiz.
+                # safe_send_message now returns the sent Message object directly,
+                # so we read sent_msg.id here — no extra get_messages() API call
+                # needed. The old approach (get_messages after send) was both slow
+                # (~300 ms per post) and racey: if another message landed in the
+                # target group between send and fetch, the wrong ID was stored,
+                # silently breaking the "ODAM OLINDI" edit feature.
                 try:
-                    sent_msgs = await assigned_client.get_messages(target, limit=1)
-                    if sent_msgs:
-                        db.save_forwarded_msg(
-                            source_chat=chat_id,
-                            source_msg=msg_id,
-                            target_chat=target,
-                            target_msg_id=sent_msgs[0].id,
-                            post_text=post_text,
-                            sender_id=message.sender_id,
-                        )
+                    db.save_forwarded_msg(
+                        source_chat=chat_id,
+                        source_msg=msg_id,
+                        target_chat=target,
+                        target_msg_id=sent_msg.id,
+                        post_text=post_text,
+                        sender_id=message.sender_id,
+                    )
                 except Exception as _exc:
                     logger.warning("[monitor] Could not save forwarded_msg id: %s", _exc)
                 logger.info(
-                    "[monitor/acct%s] ✅ FORWARDED | chat=%s | msg=%s → target=%s",
-                    account_num, chat_id, msg_id, target,
+                    "[monitor/acct%s] ✅ FORWARDED | chat=%s | msg=%s → target=%s | target_msg_id=%s",
+                    account_num, chat_id, msg_id, target, sent_msg.id,
                 )
                 db.record_stat(
                     source_chat_id=chat_id,

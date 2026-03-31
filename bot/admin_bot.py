@@ -94,6 +94,11 @@ async def _is_admin(message: Message) -> bool:
 
 # ── Keyboards ─────────────────────────────────────────────────────
 
+def _ai_filter_label() -> str:
+    """Return the current AI filter button label reflecting live state."""
+    return "🤖 AI Filter: ON ✅" if db.is_ai_filter_enabled() else "🤖 AI Filter: OFF ❌"
+
+
 def _main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -102,11 +107,10 @@ def _main_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📊 Status"),       KeyboardButton(text="🧪 Test Send")],
             [KeyboardButton(text="📈 Stats"),        KeyboardButton(text="🔍 Test Keyword")],
             [KeyboardButton(text="🔎 Check Groups"), KeyboardButton(text="🚫 Blocked Users")],
-            [KeyboardButton(text="🕌 Test Halal")],
+            [KeyboardButton(text="🕌 Test Halal"),   KeyboardButton(text=_ai_filter_label())],
         ],
         resize_keyboard=True,
     )
-
 
 def _remove_keyboard(groups: list) -> InlineKeyboardMarkup:
     buttons = []
@@ -293,7 +297,8 @@ async def cmd_start(message: Message, state: FSMContext):
         "• /stats — analytics &amp; statistics\n"
         "• /test — send a test message to target\n"
         "• /status — current config\n"
-        "• /checkgroups — membership check for all accounts"
+        "• /checkgroups — membership check for all accounts\n"
+        "• /aifilter — toggle the Groq AI halal filter on/off"
         + acct2_line,
         parse_mode="HTML",
         reply_markup=_main_keyboard(),
@@ -1372,6 +1377,62 @@ async def cb_clear_stats(callback: CallbackQuery):
     )
     await callback.answer("✅ Statistika tozalandi!")
     logger.info("[admin_bot] Stats cleared by admin. %d rows deleted.", deleted)
+
+
+
+# ── /aifilter — toggle Groq AI halal filter ───────────────────────
+#
+# When ON  (default): every qualifying job post is sent to Groq for an
+#   Islamic-compliance check.  Posts flagged as "haram" or "unclear" go
+#   to the admin review queue instead of the target group.
+#   Adds 1–10 s latency per post (external API call).
+#
+# When OFF: the Groq step is skipped entirely — posts are forwarded the
+#   instant they pass the keyword filter.  The keyword-based halal filter
+#   (halal_filter.py) still runs; only the Groq AI step is bypassed.
+#
+# The state is persisted in the bot_settings DB table so it survives
+# restarts.  The monitor.py hot path reads an in-memory cache (O(1))
+# that is invalidated as soon as this command updates the DB.
+
+@router.message(Command("aifilter"))
+@router.message(F.text.in_({"🤖 AI Filter: ON ✅", "🤖 AI Filter: OFF ❌"}))
+async def cmd_toggle_ai_filter(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.clear()
+
+    new_state = db.toggle_ai_filter()
+
+    if new_state:
+        status_icon = "✅"
+        status_text = "YOQildi"
+        detail = (
+            "Groq AI filtri endi <b>YOQIQ</b>.\n\n"
+            "Har bir ish e'loni Groq orqali tekshiriladi.\n"
+            "Harom yoki noaniq natijalar admin review queue ga yuboriladi."
+        )
+    else:
+        status_icon = "❌"
+        status_text = "O'chirildi"
+        detail = (
+            "Groq AI filtri endi <b>O'CHIQ</b>.\n\n"
+            "Ish e'lonlari Groq tekshiruvisiz darhol yuboriladi.\n"
+            "Kalit so'z asosidagi halal filtri hali ham ishlaydi."
+        )
+
+    logger.info(
+        "[admin_bot] AI filter toggled to %s by admin %s",
+        "ON" if new_state else "OFF",
+        message.from_user.id,
+    )
+
+    await message.answer(
+        f"{status_icon} <b>AI Filter {status_text}</b>\n\n"
+        f"{detail}",
+        parse_mode="HTML",
+        reply_markup=_main_keyboard(),   # button label auto-updates
+    )
 
 
 # ── Main ──────────────────────────────────────────────────────────
