@@ -32,6 +32,7 @@ import bot.database as db
 from bot.client import client_1, all_clients
 from bot.config import PHONE_NUMBER, PHONE_NUMBER_2, TARGET_GROUP
 from bot.config import DEDUP_WINDOW_HOURS, DEDUP_SIMILARITY_THRESHOLD
+from bot.config import GROQ_API_KEY
 from bot.filters import is_job_message
 from bot.halal_filter import is_haram_job
 from bot.groq_halal import check_halal_with_groq
@@ -56,7 +57,7 @@ _FILLED_KEYWORDS: list = [
     # O'zbekcha
     "odam olindi", "olindi", "olind", "band bo'ldi", "band boldi", "to'ldi", "toldi",
     "tugadi", "yopildi", "ishchi topildi", "aktual emas", "kerak emas",
-    "olingan", "band", "topildi", "yopilyapti", "bitdi", "Ishga olindi"
+    "olingan", "band", "topildi", "yopilyapti", "bitdi", "Ishga olindi",
     # Ruscha
     "взяли", "занято", "нашли", "закрыто", "не актуально", "нашли человека",
     "место занято", "уже нашли", "закрыта", "набрали",
@@ -328,33 +329,30 @@ def _make_message_handler(assigned_client, account_num: int):
             )
             return
 
-        # ── 5.1 Pre-resolve entities (lightweight) ────────────────
-        # Guruh nomi DB dan bepul olinadi (O(1), API chaqiruvi yo'q).
-        # Sender keyinchalik to'liq resolve qilinadi, bu yerda try/except
-        # bilan oldindan olamiz — review queue uchun kerak.
-        _stored_group = db.get_source_group_by_id(chat_id)
+        # ── 5.1 Pre-resolve group metadata (O(1), no API call) ──────────
+        # Guruh nomi va vaqt DB dan bepul olinadi. Sender resolve va Groq
+        # tekshiruvi kerak bo'lgandagina va parallel amalga oshiriladi.
+        _stored_group    = db.get_source_group_by_id(chat_id)
         _pre_group_title = _stored_group.title if _stored_group else "Unknown Group"
         _pre_group_link  = (
             f"https://t.me/{_stored_group.username}"
             if _stored_group and _stored_group.username else ""
         )
-        _pre_sender = None
-        try:
-            _pre_sender = await event.get_sender()
-        except Exception:
-            pass
-        _pre_author_name = get_sender_display_name(_pre_sender)
-        _pre_author_link = (
-            get_user_link(_pre_sender) if isinstance(_pre_sender, User) else ""
-        ) or ""
         _pre_msg_time = message.date
         if _pre_msg_time and _pre_msg_time.tzinfo is None:
             _pre_msg_time = _pre_msg_time.replace(tzinfo=timezone.utc)
         _pre_msg_time_str = _pre_msg_time.isoformat() if _pre_msg_time else ""
 
-        # ── 5.2 Keyword-based halal pre-filter ───────────────────
+        # ── 5.2 Keyword-based halal pre-filter ───────────────────────────
+        # Bu gate API chaqiruvisiz ishlaydi — eng tez bloklash yo'li.
+        # Harom topilsa: sender resolve qilinadi (review uchun), keyin qaytiladi.
         haram_kw = is_haram_job(text)
         if haram_kw.is_haram:
+            _kw_sender = None
+            try:
+                _kw_sender = await event.get_sender()
+            except Exception:
+                pass
             logger.info(
                 "[monitor/acct%s] HARAM (keyword) | category=%s | "
                 "keywords=%s | chat_id=%s | msg_id=%s",
@@ -369,33 +367,47 @@ def _make_message_handler(assigned_client, account_num: int):
                 haram_source="keyword",
                 group_title=_pre_group_title,
                 group_link=_pre_group_link,
-                author_name=_pre_author_name,
-                author_link=_pre_author_link,
+                author_name=get_sender_display_name(_kw_sender),
+                author_link=(
+                    get_user_link(_kw_sender)
+                    if isinstance(_kw_sender, User) else ""
+                ) or "",
                 msg_time=_pre_msg_time_str,
             )
             if sent:
                 db.mark_processed(chat_id, msg_id)
             return
 
-        # ── 5.3 Groq AI halal check ───────────────────────────────
-        # Only runs when the AI filter is enabled (admin can toggle it off).
-        # When disabled the step is skipped entirely — no network call, no
-        # delay. The cached db.is_ai_filter_enabled() read is O(1) and never
-        # hits SQLite on the hot path.
+        # ── 5.3 Groq AI halal check + sender resolve — PARALLEL ──────────
+        # Ilgari ketma-ket: get_sender() ~200ms  +  Groq ~2500ms = ~2700ms.
+        # Endi parallel (asyncio.gather): ~2500ms (bottleneck: Groq).
+        # Tejash: ~200ms har bir halol ish e'loni uchun.
         #
-        # When enabled: semaphore limits concurrent requests to 3 (free-tier
-        # Groq allows ~30/min; 3 parallel gives headroom without bursting).
-        if db.is_ai_filter_enabled():
-            async with _groq_semaphore:
-                groq_result = await check_halal_with_groq(text)
+        # AI filter o'chirilgan bo'lsa Groq UMUMAN chaqirilmaydi (0ms).
+        # db.is_ai_filter_enabled() — O(1) in-memory cache, DB I/O yo'q.
+        ai_on = db.is_ai_filter_enabled() and bool(GROQ_API_KEY)
+
+        async def _safe_get_sender():
+            try:
+                return await event.get_sender()
+            except Exception:
+                return None
+
+        if ai_on:
+            async def _groq_check():
+                async with _groq_semaphore:
+                    return await check_halal_with_groq(text)
+
+            _pre_sender, groq_result = await asyncio.gather(
+                _safe_get_sender(), _groq_check()
+            )
+
             if not groq_result.api_error and groq_result.verdict in ("haram", "unclear"):
                 verdict_label = "harom" if groq_result.verdict == "haram" else "noaniq"
                 logger.info(
                     "[monitor/acct%s] GROQ=%s | reason=%s | chat_id=%s | msg_id=%s",
                     account_num, groq_result.verdict, groq_result.reason, chat_id, msg_id,
                 )
-                # Ikkalasi ham adminga yuboriladi — admin qaror qiladi.
-                # haram_source field uchun verdict ni saqlaymiz (groq_haram / groq_unclear)
                 sent = await _send_to_review(
                     text=text,
                     source_chat=chat_id,
@@ -404,19 +416,25 @@ def _make_message_handler(assigned_client, account_num: int):
                     haram_source=f"groq_{groq_result.verdict}",
                     group_title=_pre_group_title,
                     group_link=_pre_group_link,
-                    author_name=_pre_author_name,
-                    author_link=_pre_author_link,
+                    author_name=get_sender_display_name(_pre_sender),
+                    author_link=(
+                        get_user_link(_pre_sender)
+                        if isinstance(_pre_sender, User) else ""
+                    ) or "",
                     msg_time=_pre_msg_time_str,
                 )
                 if sent:
                     db.mark_processed(chat_id, msg_id)
                 return
         else:
-            logger.debug(
-                "[monitor/acct%s] AI filter DISABLED — skipping Groq check | "
-                "chat_id=%s | msg_id=%s",
-                account_num, chat_id, msg_id,
-            )
+            # AI filter o'chirilgan — faqat sender resolve, Groq yo'q
+            _pre_sender = await _safe_get_sender()
+            if not ai_on:
+                logger.debug(
+                    "[monitor/acct%s] AI filter OFF — Groq skipped | "
+                    "chat_id=%s | msg_id=%s",
+                    account_num, chat_id, msg_id,
+                )
 
         # ── 5.5 Content duplicate gate ────────────────────────────
         # Catches copy-paste spam: the same (or nearly identical) job listing
@@ -486,8 +504,10 @@ def _make_message_handler(assigned_client, account_num: int):
                 )
 
         group_title = group_title or "Unknown Group"
-        author_name = _pre_author_name
-        author_link: Optional[str] = _pre_author_link or None
+        author_name = get_sender_display_name(_pre_sender)
+        author_link: Optional[str] = (
+            get_user_link(_pre_sender) if isinstance(_pre_sender, User) else None
+        )
 
         # ── 7. Timestamp ──────────────────────────────────────────
         msg_time = message.date

@@ -49,7 +49,7 @@ HARAM_CATEGORIES: dict[str, list[str]] = {
         "지에스",      # GS koreys yozuvi
         "cu 알바",
         "CU",
-        "cu"
+        "cu",
         "gs25",
         "gs",
         "GS25",

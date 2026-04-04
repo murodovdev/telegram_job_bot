@@ -15,11 +15,12 @@ import asyncio
 import html
 import logging
 import sys
+import time
 from datetime import datetime, timezone, timedelta
+from typing import Any, Optional
 
 # Korea Standard Time = UTC+9 (no daylight saving)
 KST = timezone(timedelta(hours=9))
-from typing import Optional
 
 from telethon import TelegramClient
 from telethon.tl.types import User, Chat, Channel, Message
@@ -168,74 +169,79 @@ def get_chat_display_name(chat) -> str:
 # ── Safe send (HTML mode) ─────────────────────────────────────────
 
 MAX_RETRIES = 3
-RETRY_DELAY = 5  # seconds between non-FloodWait retries
+RETRY_DELAY = 5              # seconds between non-FloodWait retries
+_send_lock: Any = None       # asyncio.Lock — lazy-initialised in async context
+_last_send_at: float = 0.0
+_SEND_MIN_INTERVAL: float = 3.0  # minimum seconds between consecutive sends
 
 
 async def safe_send_message(
     client: TelegramClient,
     target,
     text: str,
-) -> Optional[Message]:
+) -> Optional[Any]:
     """
-    Send a message in HTML parse mode with intelligent retry logic.
+    Send a message in HTML parse mode with rate limiting and retry logic.
 
-    Handles two distinct failure modes differently:
+    Rate limiting (eliminates FloodWait-induced delays)
+    ---------------------------------------------------
+    All sends are serialised through asyncio.Lock with a 3-second minimum
+    gap. This prevents burst forwarding from triggering Telegram FloodWait
+    (which caused 10-12 minute delays when multiple groups posted at once).
 
-    FloodWaitError — Telegram imposes a mandatory wait and tells us exactly
-        how many seconds to wait. We must respect that number exactly.
-        Retrying before the wait expires always fails again and wastes the
-        retry budget. FloodWait does NOT consume a retry attempt — after
-        sleeping the required time we try again on top of the normal budget.
-
-    All other errors — network hiccups, temporary server errors, etc.
-        Use exponential back-off (5s, 10s) before retrying.
-
-    Returns the sent Message object on success, None after all retries are
-    exhausted. Returning the Message directly (instead of a bool) lets the
-    caller record target_msg_id from sent_msg.id without an extra
-    get_messages() round-trip — which was both slow (~300 ms) and racey
-    (another message landing between send and get could give the wrong ID).
+    Returns the sent Message object on success (truthy, has .id attribute),
+    None on failure (falsy). Callers use `if sent_msg:` as before; callers
+    needing the message ID use `sent_msg.id` directly.
     """
     from telethon.errors import FloodWaitError
+    global _send_lock, _last_send_at
 
-    attempt = 0
-    while attempt < MAX_RETRIES:
-        attempt += 1
-        try:
-            sent = await client.send_message(
-                target,
-                text,
-                parse_mode="html",
-                link_preview=False,
-            )
-            return sent  # Message object — caller can read .id directly
+    if _send_lock is None:
+        _send_lock = asyncio.Lock()
 
-        except FloodWaitError as e:
-            # Telegram gave us the exact number of seconds we must wait.
-            # Add a 5-second buffer so we don't immediately hit the limit again.
-            # Crucially: do NOT increment attempt — the wait was forced by
-            # Telegram, not a failure on our part. We will retry after sleeping.
-            wait = e.seconds + 5
-            logger.warning(
-                "[utils] ⏳ FloodWait %ds (attempt %d/%d) — sleeping %ds then retrying",
-                e.seconds, attempt, MAX_RETRIES, wait,
-            )
-            await asyncio.sleep(wait)
-            attempt -= 1  # undo the increment — FloodWait does not count
+    async with _send_lock:
+        # Enforce minimum interval between sends
+        elapsed = time.monotonic() - _last_send_at
+        if _last_send_at > 0 and elapsed < _SEND_MIN_INTERVAL:
+            gap = _SEND_MIN_INTERVAL - elapsed
+            logger.debug("[utils] rate-limit pause %.2fs before send", gap)
+            await asyncio.sleep(gap)
 
-        except Exception as exc:
-            logger.warning(
-                "[utils] Send attempt %d/%d to %s failed: %s",
-                attempt, MAX_RETRIES, target, exc,
-            )
-            if attempt < MAX_RETRIES:
-                await asyncio.sleep(RETRY_DELAY * attempt)
+        attempt = 0
+        while attempt < MAX_RETRIES:
+            attempt += 1
+            try:
+                sent = await client.send_message(
+                    target,
+                    text,
+                    parse_mode="html",
+                    link_preview=False,
+                )
+                _last_send_at = time.monotonic()
+                return sent
 
-    logger.error(
-        "[utils] All %d send attempts to %s failed — message dropped.",
-        MAX_RETRIES, target,
-    )
-    return None
+            except FloodWaitError as e:
+                wait = e.seconds + 5
+                logger.warning(
+                    "[utils] FloodWait %ds (attempt %d/%d) — sleeping %ds",
+                    e.seconds, attempt, MAX_RETRIES, wait,
+                )
+                await asyncio.sleep(wait)
+                attempt -= 1  # FloodWait does not count as a retry
+
+            except Exception as exc:
+                logger.warning(
+                    "[utils] Send attempt %d/%d to %s failed: %s",
+                    attempt, MAX_RETRIES, target, exc,
+                )
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_DELAY * attempt)
+
+        logger.error(
+            "[utils] All %d send attempts to %s failed — message dropped.",
+            MAX_RETRIES, target,
+        )
+        return None
 
 
 # ── Misc ──────────────────────────────────────────────────────────
