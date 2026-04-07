@@ -378,63 +378,14 @@ def _make_message_handler(assigned_client, account_num: int):
                 db.mark_processed(chat_id, msg_id)
             return
 
-        # ── 5.3 Groq AI halal check + sender resolve — PARALLEL ──────────
-        # Ilgari ketma-ket: get_sender() ~200ms  +  Groq ~2500ms = ~2700ms.
-        # Endi parallel (asyncio.gather): ~2500ms (bottleneck: Groq).
-        # Tejash: ~200ms har bir halol ish e'loni uchun.
-        #
-        # AI filter o'chirilgan bo'lsa Groq UMUMAN chaqirilmaydi (0ms).
-        # db.is_ai_filter_enabled() — O(1) in-memory cache, DB I/O yo'q.
-        ai_on = db.is_ai_filter_enabled() and bool(GROQ_API_KEY)
-
-        async def _safe_get_sender():
-            try:
-                return await event.get_sender()
-            except Exception:
-                return None
-
-        if ai_on:
-            async def _groq_check():
-                async with _groq_semaphore:
-                    return await check_halal_with_groq(text)
-
-            _pre_sender, groq_result = await asyncio.gather(
-                _safe_get_sender(), _groq_check()
-            )
-
-            if not groq_result.api_error and groq_result.verdict in ("haram", "unclear"):
-                verdict_label = "harom" if groq_result.verdict == "haram" else "noaniq"
-                logger.info(
-                    "[monitor/acct%s] GROQ=%s | reason=%s | chat_id=%s | msg_id=%s",
-                    account_num, groq_result.verdict, groq_result.reason, chat_id, msg_id,
-                )
-                sent = await _send_to_review(
-                    text=text,
-                    source_chat=chat_id,
-                    source_msg=msg_id,
-                    haram_reason=groq_result.reason or f"AI natijasi: {verdict_label}",
-                    haram_source=f"groq_{groq_result.verdict}",
-                    group_title=_pre_group_title,
-                    group_link=_pre_group_link,
-                    author_name=get_sender_display_name(_pre_sender),
-                    author_link=(
-                        get_user_link(_pre_sender)
-                        if isinstance(_pre_sender, User) else ""
-                    ) or "",
-                    msg_time=_pre_msg_time_str,
-                )
-                if sent:
-                    db.mark_processed(chat_id, msg_id)
-                return
-        else:
-            # AI filter o'chirilgan — faqat sender resolve, Groq yo'q
-            _pre_sender = await _safe_get_sender()
-            if not ai_on:
-                logger.debug(
-                    "[monitor/acct%s] AI filter OFF — Groq skipped | "
-                    "chat_id=%s | msg_id=%s",
-                    account_num, chat_id, msg_id,
-                )
+        # ── 5.3 Sender resolve (lightweight) ────────────────────────────
+        # Groq tekshiruvi endi HOT PATH da EMAS — post forward qilinganidan
+        # KEYIN fon rejimida ishlaydi. Bu "shu zahoti" yuborishni ta'minlaydi.
+        _pre_sender = None
+        try:
+            _pre_sender = await event.get_sender()
+        except Exception:
+            pass
 
         # ── 5.5 Content duplicate gate ────────────────────────────
         # Catches copy-paste spam: the same (or nearly identical) job listing
@@ -575,6 +526,26 @@ def _make_message_handler(assigned_client, account_num: int):
                     matched_kw=", ".join(result.matched_keywords),
                     match_tier=result.match_tier,
                 )
+                # ── Groq background check ───────────────────────────────────────
+                # Post allaqachon guruhga yuborildi. Groq fon rejimida
+                # tekshiradi — haram bo'lsa postni o'chirib adminga xabar beradi.
+                if db.is_ai_filter_enabled() and bool(GROQ_API_KEY):
+                    asyncio.create_task(
+                        _background_groq_check(
+                            client=assigned_client,
+                            target=target,
+                            target_msg_id=sent_msg.id,
+                            source_chat=chat_id,
+                            source_msg=msg_id,
+                            text=text,
+                            group_title=group_title,
+                            group_link=group_link or "",
+                            author_name=author_name,
+                            author_link=author_link or "",
+                            msg_time=_pre_msg_time_str,
+                            account_num=account_num,
+                        )
+                    )
             else:
                 logger.error(
                     "[monitor/acct%s] ❌ SEND FAILED | chat=%s | msg=%s | target=%s",
@@ -594,6 +565,86 @@ def _make_message_handler(assigned_client, account_num: int):
                 _pending_hashes.discard(content_hash)
 
     return _on_new_message
+
+
+# ── Background Groq halal check ───────────────────────────────────────────────
+# Post allaqachon target guruhga yuborilgan. Bu funksiya fon rejimida ishlaydi.
+# Haram yoki noaniq: (1) postni o'chiradi, (2) adminga review yuboradi.
+# Halol: hech narsa qilmaydi.
+
+async def _background_groq_check(
+    client,
+    target: int,
+    target_msg_id: int,
+    source_chat: int,
+    source_msg: int,
+    text: str,
+    group_title: str,
+    group_link: str,
+    author_name: str,
+    author_link: str,
+    msg_time: str,
+    account_num: int,
+) -> None:
+    """Fon rejimida Groq tekshiruvi. Haram bo'lsa postni o'chirib adminga yuboradi."""
+    try:
+        async with _groq_semaphore:
+            groq_result = await check_halal_with_groq(text)
+
+        if groq_result.api_error:
+            logger.debug(
+                "[monitor/acct%s] bg-Groq: API error — post kept | target_msg=%s",
+                account_num, target_msg_id,
+            )
+            return
+
+        if groq_result.verdict not in ("haram", "unclear"):
+            logger.debug(
+                "[monitor/acct%s] bg-Groq: halol | target_msg=%s",
+                account_num, target_msg_id,
+            )
+            return
+
+        verdict_label = "harom" if groq_result.verdict == "haram" else "noaniq"
+        logger.info(
+            "[monitor/acct%s] bg-Groq: %s | reason=%s | "
+            "source=%s/%s → deleting target_msg=%s",
+            account_num, groq_result.verdict, groq_result.reason,
+            source_chat, source_msg, target_msg_id,
+        )
+
+        # Target guruhdan o'chirish
+        try:
+            await client.delete_messages(target, [target_msg_id])
+            logger.info(
+                "[monitor/acct%s] bg-Groq: deleted target_msg=%s",
+                account_num, target_msg_id,
+            )
+        except Exception as del_exc:
+            logger.warning(
+                "[monitor/acct%s] bg-Groq: delete failed target_msg=%s: %s",
+                account_num, target_msg_id, del_exc,
+            )
+
+        # Adminga review queue
+        await _send_to_review(
+            text=text,
+            source_chat=source_chat,
+            source_msg=source_msg,
+            haram_reason=groq_result.reason or f"AI natijasi: {verdict_label}",
+            haram_source=f"groq_{groq_result.verdict}",
+            group_title=group_title,
+            group_link=group_link,
+            author_name=author_name,
+            author_link=author_link,
+            msg_time=msg_time,
+        )
+
+    except Exception as exc:
+        logger.error(
+            "[monitor/acct%s] bg-Groq check crashed: %s",
+            account_num, exc,
+        )
 
 
 # ── Handler 2: auto-delete join/leave service messages ────────────
