@@ -378,29 +378,17 @@ def _make_message_handler(assigned_client, account_num: int):
                 db.mark_processed(chat_id, msg_id)
             return
 
-        # ── 5.3 Sender resolve (lightweight) ────────────────────────────
-        # Groq tekshiruvi endi HOT PATH da EMAS — post forward qilinganidan
-        # KEYIN fon rejimida ishlaydi. Bu "shu zahoti" yuborishni ta'minlaydi.
-        _pre_sender = None
-        try:
-            _pre_sender = await event.get_sender()
-        except Exception:
-            pass
-
-        # ── 5.5 Content duplicate gate ────────────────────────────
-        # Catches copy-paste spam: the same (or nearly identical) job listing
-        # posted manually in multiple groups — different chat/msg IDs, no
-        # fwd_from header, so Gates 3 and 4 cannot catch it.
+        # ── 5.3 + 5.5  Sender resolve  &  content dedup — PARALLEL ─────────
         #
-        # Two-tier check (see database.py for full design rationale):
-        #   Tier 1 — exact SHA-256 hash match (O(1))
-        #   Tier 2 — SequenceMatcher similarity against recent texts (O(n))
+        # Ilgari: get_sender() (~200ms) va dedup (~50ms) ketma-ket = ~250ms.
+        # Endi:   asyncio.gather() bilan ikkalasi parallel = ~200ms (max).
         #
-        # _pending_hashes guards against the race condition where two accounts
-        # receive the same message within milliseconds — both would pass the
-        # DB duplicate check before either records the hash.  The second
-        # coroutine to arrive sees the hash in _pending_hashes and exits early.
+        # Exact-hash check (Tier 1, O(1)) avval sinxron tekshiriladi —
+        # duplicate bo'lsa API chaqiruvlarga ketmasdan darhol qaytiladi.
         content_hash: Optional[str] = None
+        _pre_sender: Optional[object] = None
+
+        # Tier 1 exact-hash sinxron — O(1), DB I/O yo'q (in-memory)
         if DEDUP_WINDOW_HOURS > 0:
             content_hash = db._content_hash(text)
             if content_hash in _pending_hashes:
@@ -412,19 +400,35 @@ def _make_message_handler(assigned_client, account_num: int):
                 return
             _pending_hashes.add(content_hash)
 
-            is_dup, dup_reason = db.is_content_duplicate(
+        # get_sender() va fuzzy dedup birga parallel
+        async def _do_get_sender():
+            try:
+                return await event.get_sender()
+            except Exception:
+                return None
+
+        async def _do_dedup():
+            if DEDUP_WINDOW_HOURS <= 0 or content_hash is None:
+                return False, ""
+            return db.is_content_duplicate(
                 text,
                 window_hours=DEDUP_WINDOW_HOURS,
                 similarity_threshold=DEDUP_SIMILARITY_THRESHOLD,
             )
-            if is_dup:
+
+        _pre_sender, (is_dup, dup_reason) = await asyncio.gather(
+            _do_get_sender(), _do_dedup()
+        )
+
+        if is_dup:
+            if content_hash:
                 _pending_hashes.discard(content_hash)
-                logger.info(
-                    "[monitor/acct%s] SKIPPED (content duplicate) | %s | "
-                    "chat_id=%s | msg_id=%s",
-                    account_num, dup_reason, chat_id, msg_id,
-                )
-                return
+            logger.info(
+                "[monitor/acct%s] SKIPPED (content duplicate) | %s | "
+                "chat_id=%s | msg_id=%s",
+                account_num, dup_reason, chat_id, msg_id,
+            )
+            return
 
         # Confirmed job post — safe to register origin
         if _pending_original:
