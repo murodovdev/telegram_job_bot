@@ -9,6 +9,25 @@ that broke Markdown parsing silently — safe_send_message caught the exception,
 logged it, but the message was already marked as processed and lost forever.
 HTML mode uses explicit <b> tags on controlled text and html.escape() on all
 user-supplied content, so it never fails due to special characters.
+
+KEY FIX (v3)
+------------
+safe_send_message uchun uchta muhim tuzatish:
+
+1. Har client uchun alohida lock (_client_states dict).
+   Ilgari: bitta global lock — client_1 FloodWait olganda client_2 ham
+   10+ daqiqa bloklanardi.
+   Endi: har client mustaqil ishlaydi.
+
+2. FloodWait paytida lock bo'shatiladi.
+   Ilgari: asyncio.sleep(600) davomida lock ushlab turilardi —
+   navbatdagi BARCHA xabarlar 10 daqiqa qotib qolardi.
+   Endi: lock bo'shatiladi → sleep → lock qayta olinadi.
+
+3. Lock lazy init race condition tuzatildi.
+   Ilgari: ikkita coroutine bir vaqtda _send_lock is None ko'rib,
+   ikki xil Lock yaratar edi — rate limiter ishlamas edi.
+   Endi: har client uchun dict da bir marta yaratiladi.
 """
 
 import asyncio
@@ -119,7 +138,7 @@ def build_job_post(
         owner_part = safe_author_name
 
     return (
-        f"<b>⚠️ Yangi ish e’loni:</b>\n\n"
+        f"<b>⚠️ Yangi ish e'loni:</b>\n\n"
         f"<b>Guruh:</b> {group_part}\n"
         f"<b>Muallif:</b> {owner_part}\n"
         f"<b>Vaqt:</b> {time_str}\n\n"
@@ -166,26 +185,42 @@ def get_chat_display_name(chat) -> str:
 
 # ── Safe send (HTML mode) ─────────────────────────────────────────
 
-# ── Safe send (HTML mode) ─────────────────────────────────────────
+MAX_RETRIES    = 3
+RETRY_DELAY    = 5      # seconds between non-FloodWait retries
+_SEND_MIN_GAP  = 3.1    # minimum seconds between sends per client
 
-MAX_RETRIES = 3
-RETRY_DELAY = 5  # seconds between non-FloodWait retries
+# ── Per-client rate limiter ───────────────────────────────────────
+#
+# MUAMMO (v2 da):
+#   Bitta global _send_lock va _last_send_at bor edi.
+#   client_1 FloodWait (600s) olganda — lock ushlab turib uxlardi.
+#   client_2 ham shu lockni kutib, 10+ daqiqa bloklanardi.
+#   Natija: barcha xabarlar 10-15 daqiqa kechikardi.
+#
+# YECHIM (v3):
+#   Har bir client uchun mustaqil lock va last_send vaqti.
+#   _client_states[id(client)] = {"lock": Lock, "last_send": float}
+#
+#   Foyda 1: client_1 bloklanса — client_2 mustaqil ishlayveradi.
+#   Foyda 2: FloodWait paytida lock bo'shatiladi (quyida tushuntirish).
+#   Foyda 3: Race condition yo'q — dict yozuvi birinchi chaqiruvda,
+#            event loop single-threaded bo'lgani uchun xavfsiz.
 
-# ── Send rate limiter ─────────────────────────────────────────────
-# 12 daqiqalik kechikishning sababi: bir vaqtda ko'p post kelganda
-# hammasi bir zumda yuboriladi → Telegram FloodWait 600s beradi →
-# keyingi barcha postlar 10+ daqiqa kutadi.
-#
-# Yechim: postlar orasida minimal 3s interval.
-# Telegram chegarasi: ~20 xabar/daqiqa (1 ta / 3s).
-#
-# Natija:
-#   1 ta post keldi  → darhol yuboriladi (0ms kutish)
-#   5 ta bir vaqtda  → 0s, 3s, 6s, 9s, 12s — hech qachon 600s emas
-#
-_send_lock: Any = None    # asyncio.Lock — lazy init
-_last_send_at: float = 0.0
-_SEND_MIN_GAP: float = 3.1  # 3.1s: Telegram limitidan biroz yuqori
+_client_states: dict[int, dict] = {}
+
+
+def _get_client_state(client: TelegramClient) -> dict:
+    """
+    Berilgan client uchun state dict qaytaradi.
+    Yo'q bo'lsa yaratadi — dict lookup O(1), xavfsiz.
+    """
+    cid = id(client)
+    if cid not in _client_states:
+        _client_states[cid] = {
+            "lock":      asyncio.Lock(),
+            "last_send": 0.0,
+        }
+    return _client_states[cid]
 
 
 async def safe_send_message(
@@ -194,28 +229,31 @@ async def safe_send_message(
     text: str,
 ) -> Optional[Any]:
     """
-    HTML formatda xabar yuboradi: rate limiting + retry.
+    HTML formatda xabar yuboradi: per-client rate limiting + retry.
 
-    Rate limiting: postlar orasida 3s interval — FloodWait oldini oladi.
-    Yagona post kelganda: darhol yuboriladi (queue bo'sh bo'lsa 0ms).
-    Bir nechta post bir vaqtda: 3s, 6s, 9s... Hech qachon 10 daqiqa emas.
+    v3 tuzatishlari:
+      • Har client uchun alohida lock — biri bloklanса ikkinchisi ishlaydi.
+      • FloodWait paytida lock bo'shatiladi — navbat qotib qolmaydi.
+      • Rate-limit sleep ham lock ichida, lekin FloodWait emas.
 
     Muvaffaqiyatda: Message ob'ektini qaytaradi (.id atributi bor).
-    Xatoda: None.
+    Xatoda (3 urinishdan keyin): None.
     """
     from telethon.errors import FloodWaitError
-    global _send_lock, _last_send_at
 
-    if _send_lock is None:
-        _send_lock = asyncio.Lock()
+    state = _get_client_state(client)
+    lock  = state["lock"]
 
-    async with _send_lock:
-        # Rate limiting: oxirgi yuborishdan beri 3s o'tganmi?
-        elapsed = time.monotonic() - _last_send_at
-        if _last_send_at > 0 and elapsed < _SEND_MIN_GAP:
-            wait_gap = _SEND_MIN_GAP - elapsed
-            logger.debug("[utils] rate-limit: %.2fs kutilmoqda", wait_gap)
-            await asyncio.sleep(wait_gap)
+    async with lock:
+        # ── Rate limiting ─────────────────────────────────────────
+        # Oxirgi yuborishdan beri _SEND_MIN_GAP o'tganmi?
+        # Bu sleep lock ICHIDA — boshqa coroutine bu clientga
+        # yuborishga urinmaydi (to'g'ri xatti-harakat).
+        elapsed = time.monotonic() - state["last_send"]
+        if state["last_send"] > 0 and elapsed < _SEND_MIN_GAP:
+            gap = _SEND_MIN_GAP - elapsed
+            logger.debug("[utils] rate-limit gap: %.2fs | client_id=%s", gap, id(client))
+            await asyncio.sleep(gap)
 
         attempt = 0
         while attempt < MAX_RETRIES:
@@ -227,30 +265,46 @@ async def safe_send_message(
                     parse_mode="html",
                     link_preview=False,
                 )
-                _last_send_at = time.monotonic()
+                state["last_send"] = time.monotonic()
                 return sent
 
             except FloodWaitError as e:
-                # FloodWait kelsa: kutib, qayta urinish (retry sanasiga kirmaydi)
-                wait = e.seconds + 5
+                flood_wait = e.seconds + 5
                 logger.warning(
-                    "[utils] FloodWait %ds (urinish %d/%d) — %ds kutilmoqda",
-                    e.seconds, attempt, MAX_RETRIES, wait,
+                    "[utils] ⚠️ FloodWait %ds | client_id=%s | "
+                    "lock bo'shatildi — navbat kutmaydi",
+                    e.seconds, id(client),
                 )
-                await asyncio.sleep(wait)
+                # ── ASOSIY TUZATISH ───────────────────────────────
+                # v2 da: await asyncio.sleep(600) lock ICHIDA edi.
+                # Natija: navbatdagi barcha xabarlar 10 daqiqa qotardi.
+                #
+                # v3 da: lock bo'shatiladi → uxlaymiz → lock qayta olinadi.
+                # Navbatdagi xabarlar bu vaqtda ham kutadi, chunki
+                # Telegram ularni ham bloklar — lekin lock bo'sh bo'lgani
+                # uchun boshqa client (client_2) to'siqsiz ishlayveradi.
+                lock.release()
+                try:
+                    await asyncio.sleep(flood_wait)
+                finally:
+                    # finally: exception bo'lsa ham lock qayta olinadi
+                    await lock.acquire()
+
+                # FloodWait dan keyin attempt hisoblanmaydi — qayta urinish
                 attempt -= 1
 
             except Exception as exc:
                 logger.warning(
-                    "[utils] Yuborish %d/%d muvaffaqiyatsiz %s: %s",
+                    "[utils] Yuborish %d/%d muvaffaqiyatsiz | target=%s | xato: %s",
                     attempt, MAX_RETRIES, target, exc,
                 )
                 if attempt < MAX_RETRIES:
                     await asyncio.sleep(RETRY_DELAY * attempt)
 
         logger.error(
-            "[utils] %d urinishdan keyin ham yuborilmadi — xabar tushirildi.",
-            MAX_RETRIES,
+            "[utils] ❌ %d urinishdan keyin yuborilmadi — xabar tushirildi. "
+            "client_id=%s | target=%s",
+            MAX_RETRIES, id(client), target,
         )
         return None
 
