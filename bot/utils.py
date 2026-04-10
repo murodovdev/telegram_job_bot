@@ -15,6 +15,7 @@ import asyncio
 import html
 import logging
 import sys
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
@@ -170,6 +171,22 @@ def get_chat_display_name(chat) -> str:
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds between non-FloodWait retries
 
+# ── Send rate limiter ─────────────────────────────────────────────
+# 12 daqiqalik kechikishning sababi: bir vaqtda ko'p post kelganda
+# hammasi bir zumda yuboriladi → Telegram FloodWait 600s beradi →
+# keyingi barcha postlar 10+ daqiqa kutadi.
+#
+# Yechim: postlar orasida minimal 3s interval.
+# Telegram chegarasi: ~20 xabar/daqiqa (1 ta / 3s).
+#
+# Natija:
+#   1 ta post keldi  → darhol yuboriladi (0ms kutish)
+#   5 ta bir vaqtda  → 0s, 3s, 6s, 9s, 12s — hech qachon 600s emas
+#
+_send_lock: Any = None    # asyncio.Lock — lazy init
+_last_send_at: float = 0.0
+_SEND_MIN_GAP: float = 3.1  # 3.1s: Telegram limitidan biroz yuqori
+
 
 async def safe_send_message(
     client: TelegramClient,
@@ -177,50 +194,65 @@ async def safe_send_message(
     text: str,
 ) -> Optional[Any]:
     """
-    Send a message in HTML parse mode with retry logic.
+    HTML formatda xabar yuboradi: rate limiting + retry.
 
-    Returns the sent Message object on success (truthy, has .id attribute),
-    None on failure (falsy).
+    Rate limiting: postlar orasida 3s interval — FloodWait oldini oladi.
+    Yagona post kelganda: darhol yuboriladi (queue bo'sh bo'lsa 0ms).
+    Bir nechta post bir vaqtda: 3s, 6s, 9s... Hech qachon 10 daqiqa emas.
 
-    FloodWaitError: respects Telegram's mandatory wait then retries.
-    Other errors: exponential back-off (5s, 10s).
+    Muvaffaqiyatda: Message ob'ektini qaytaradi (.id atributi bor).
+    Xatoda: None.
     """
     from telethon.errors import FloodWaitError
+    global _send_lock, _last_send_at
 
-    attempt = 0
-    while attempt < MAX_RETRIES:
-        attempt += 1
-        try:
-            sent = await client.send_message(
-                target,
-                text,
-                parse_mode="html",
-                link_preview=False,
-            )
-            return sent
+    if _send_lock is None:
+        _send_lock = asyncio.Lock()
 
-        except FloodWaitError as e:
-            wait = e.seconds + 5
-            logger.warning(
-                "[utils] FloodWait %ds (attempt %d/%d) — sleeping %ds",
-                e.seconds, attempt, MAX_RETRIES, wait,
-            )
-            await asyncio.sleep(wait)
-            attempt -= 1  # FloodWait does not consume a retry
+    async with _send_lock:
+        # Rate limiting: oxirgi yuborishdan beri 3s o'tganmi?
+        elapsed = time.monotonic() - _last_send_at
+        if _last_send_at > 0 and elapsed < _SEND_MIN_GAP:
+            wait_gap = _SEND_MIN_GAP - elapsed
+            logger.debug("[utils] rate-limit: %.2fs kutilmoqda", wait_gap)
+            await asyncio.sleep(wait_gap)
 
-        except Exception as exc:
-            logger.warning(
-                "[utils] Send attempt %d/%d to %s failed: %s",
-                attempt, MAX_RETRIES, target, exc,
-            )
-            if attempt < MAX_RETRIES:
-                await asyncio.sleep(RETRY_DELAY * attempt)
+        attempt = 0
+        while attempt < MAX_RETRIES:
+            attempt += 1
+            try:
+                sent = await client.send_message(
+                    target,
+                    text,
+                    parse_mode="html",
+                    link_preview=False,
+                )
+                _last_send_at = time.monotonic()
+                return sent
 
-    logger.error(
-        "[utils] All %d send attempts to %s failed — message dropped.",
-        MAX_RETRIES, target,
-    )
-    return None
+            except FloodWaitError as e:
+                # FloodWait kelsa: kutib, qayta urinish (retry sanasiga kirmaydi)
+                wait = e.seconds + 5
+                logger.warning(
+                    "[utils] FloodWait %ds (urinish %d/%d) — %ds kutilmoqda",
+                    e.seconds, attempt, MAX_RETRIES, wait,
+                )
+                await asyncio.sleep(wait)
+                attempt -= 1
+
+            except Exception as exc:
+                logger.warning(
+                    "[utils] Yuborish %d/%d muvaffaqiyatsiz %s: %s",
+                    attempt, MAX_RETRIES, target, exc,
+                )
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_DELAY * attempt)
+
+        logger.error(
+            "[utils] %d urinishdan keyin ham yuborilmadi — xabar tushirildi.",
+            MAX_RETRIES,
+        )
+        return None
 
 
 # ── Misc ──────────────────────────────────────────────────────────
