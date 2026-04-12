@@ -232,7 +232,8 @@ def _make_message_handler(assigned_client, account_num: int):
     The handler only processes messages from source groups that are assigned
     to account_num in the database — the two accounts never step on each other.
     """
-    async def _on_new_message(event: events.NewMessage.Event) -> None:
+    async def _process_message(event: events.NewMessage.Event) -> None:
+        """Actual processing — runs as an independent asyncio task."""
         message: Message = event.message
         chat_id = event.chat_id
         msg_id  = message.id
@@ -243,15 +244,18 @@ def _make_message_handler(assigned_client, account_num: int):
         )
 
         # ── 1. Source-group gate (account-specific) ───────────────
-        # Uses the in-memory cache — O(1) frozenset lookup, no DB I/O,
-        # no event-loop blocking. Called on every incoming message so
-        # this is the single most performance-critical line in the bot.
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
             logger.debug(
                 "[monitor/acct%s] IGNORED (not a source group) | chat_id=%s | msg_id=%s",
                 account_num, chat_id, msg_id,
             )
             return
+
+    async def _on_new_message(event: events.NewMessage.Event) -> None:
+        # Spawn independent task — returns to Telethon immediately.
+        # This means every message is processed concurrently and no
+        # message has to wait for another message's handler to finish.
+        asyncio.create_task(_process_message(event))
 
         logger.info(
             "[monitor/acct%s] SOURCE GROUP HIT | chat_id=%s | msg_id=%s",
@@ -778,7 +782,7 @@ def _make_filled_handlers(assigned_client, account_num: int):
         if not message.reply_to_msg_id:
             return
 
-        text = message.text or message.caption or ""
+        text = getattr(message, 'text', None) or getattr(message, 'caption', None) or ""
         if not _is_filled_signal(text):
             return
 
@@ -800,7 +804,7 @@ def _make_filled_handlers(assigned_client, account_num: int):
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
             return
 
-        text = message.text or message.caption or ""
+        text = getattr(message, 'text', None) or getattr(message, 'caption', None) or ""
         if not _is_filled_signal(text):
             return
 
