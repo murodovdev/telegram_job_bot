@@ -16,7 +16,7 @@ Changes in v5
 import asyncio
 import logging
 from datetime import timezone
-from typing import Optional
+from typing import Optional, Tuple
 
 from telethon import events
 from telethon.tl.types import (
@@ -51,9 +51,7 @@ from bot.utils import (
 logger = logging.getLogger(__name__)
 
 # ── "Odam olindi" kalit so'zlar ──────────────────────────────────
-# Manba guruhda ish e'loniga reply yoki edit orqali kelganda
-# target guruhda post "ODAM OLINDI" deb edit qilinadi.
-_FILLED_KEYWORDS: list = [
+_FILLED_KEYWORDS: list[str] = [
     # O'zbekcha
     "odam olindi", "olindi", "olind", "band bo'ldi", "band boldi", "to'ldi", "toldi",
     "tugadi", "yopildi", "ishchi topildi", "aktual emas", "kerak emas",
@@ -66,6 +64,7 @@ _FILLED_KEYWORDS: list = [
     "뽑았어요", "완료", "마감입니다",
 ]
 
+
 def _is_filled_signal(text: str) -> bool:
     """Matn 'odam olindi' signalimi tekshiradi."""
     if not text:
@@ -75,11 +74,10 @@ def _is_filled_signal(text: str) -> bool:
 
 
 # ── Review queue sender ───────────────────────────────────────────
-# Harom deb topilgan ish e'lonini admin botga yuboradi.
-# Yuborish uchun aiogram Bot instance lazim — admin_bot.py dan olinadi.
 _aiogram_bot = None
 
-def set_aiogram_bot(bot) -> None:
+
+def set_aiogram_bot(bot) -> None:  # type: ignore[type-arg]
     """admin_bot.py dan aiogram Bot instansini uzatish uchun."""
     global _aiogram_bot
     _aiogram_bot = bot
@@ -97,13 +95,6 @@ async def _send_to_review(
     author_link: str = "",
     msg_time: str = "",
 ) -> bool:
-    """
-    Harom deb topilgan postni DB ga saqlaydi va admin botga
-    'Tasdiqlash / Rad etish' tugmalar bilan yuboradi.
-    Guruh va yuboruvchi metadata ham saqlanadi — approve da
-    to'liq format bilan guruhga yuboriladi.
-    Qaytaradi: True = muvaffaqiyatli, False = xato.
-    """
     from bot.config import ADMIN_USER_ID
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -126,6 +117,7 @@ async def _send_to_review(
         source_label = "🤔 Groq AI (noaniq)"
     else:
         source_label = "🤖 Groq AI"
+
     preview = text[:400] + ("…" if len(text) > 400 else "")
 
     import html as _html
@@ -162,20 +154,13 @@ async def _send_to_review(
         f"<b>Xabar matni:</b>\n{_html.escape(preview)}"
     )
 
-    # Fix 8: callback_data Telegram 64 bayt limitini tekshirish
     approve_cb = f"review:approve:{review_id}"
     reject_cb  = f"review:reject:{review_id}"
     assert len(approve_cb.encode()) <= 64, f"callback_data too long: {approve_cb}"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="✅ Tasdiqlash — guruhga yuborish",
-            callback_data=approve_cb,
-        ),
-        InlineKeyboardButton(
-            text="❌ Rad etish",
-            callback_data=reject_cb,
-        ),
+        InlineKeyboardButton(text="✅ Tasdiqlash — guruhga yuborish", callback_data=approve_cb),
+        InlineKeyboardButton(text="❌ Rad etish",                      callback_data=reject_cb),
     ]])
 
     if _aiogram_bot:
@@ -195,22 +180,11 @@ async def _send_to_review(
         logger.warning("[monitor] _aiogram_bot not set — review not sent to admin")
         return False
 
-# ── Race-condition guard for Gate 5.5 ────────────────────────────
-#
-# Problem: two accounts can receive the same copy-paste message within
-# milliseconds of each other.  Both call is_content_duplicate() before
-# either has finished sending and recording the hash, so both see "no
-# duplicate" and both forward the post.
-#
-# Fix: maintain a module-level set of SHA-256 hashes that are currently
-# in-flight (between duplicate-check and hash-registration).  The second
-# coroutine to arrive sees the hash already in the set and drops the message.
-# The set entry is always removed in a finally block so a failed send never
-# permanently blocks the content.
-_pending_hashes: set = set()
 
-# Fix 5: Groq API rate limit himoyasi.
-# Bir vaqtda maksimal 3 ta parallel Groq so'rov — free tier limit 30/min.
+# ── Race-condition guard ──────────────────────────────────────────
+_pending_hashes: set[str] = set()
+
+# Groq API rate limit himoyasi — free tier 30 req/min
 _groq_semaphore = asyncio.Semaphore(3)
 
 
@@ -223,27 +197,54 @@ def _get_target_id() -> Optional[int]:
     return None
 
 
+# ── Top-level helpers (Pylance uchun nested def yo'q) ────────────
+# asyncio.gather ichida ishlatiladigan funksiyalar top-level da yozilgan
+# — closure orqali o'zgaruvchi o'qish muammosi yo'q.
+
+async def _resolve_sender(event: events.NewMessage.Event) -> Optional[object]:
+    """Xabar yuboruvchini xavfsiz tarzda resolve qiladi."""
+    try:
+        return await event.get_sender()
+    except Exception:
+        return None
+
+
+async def _check_content_duplicate(
+    text: str,
+    content_hash: Optional[str],
+) -> Tuple[bool, str]:
+    """Kontent dublikatini tekshiradi. (is_dup, reason) qaytaradi."""
+    if DEDUP_WINDOW_HOURS <= 0 or content_hash is None:
+        return False, ""
+    return db.is_content_duplicate(  # type: ignore[return-value]
+        text,
+        window_hours=DEDUP_WINDOW_HOURS,
+        similarity_threshold=DEDUP_SIMILARITY_THRESHOLD,
+    )
+
+
 # ── Handler factory ───────────────────────────────────────────────
 
-def _make_message_handler(assigned_client, account_num: int):
+def _make_message_handler(assigned_client: object, account_num: int):  # type: ignore[type-arg]
     """
     Return a NewMessage event handler bound to a specific client and account.
 
-    The handler only processes messages from source groups that are assigned
-    to account_num in the database — the two accounts never step on each other.
+    Barcha o'zgaruvchilar (chat_id, msg_id, text ...) _process_message ichida
+    aniqlanadi. _on_new_message faqat task yaratadi — NameError va Pylance
+    xatolari yo'q.
     """
+
     async def _process_message(event: events.NewMessage.Event) -> None:
-        """Actual processing — runs as an independent asyncio task."""
         message: Message = event.message
-        chat_id = event.chat_id
-        msg_id  = message.id
+        chat_id: int = event.chat_id
+        msg_id: int  = message.id
 
         logger.debug(
             "[monitor/acct%s] MSG RECEIVED | chat_id=%-20s | msg_id=%-8s | preview=%r",
             account_num, chat_id, msg_id, (message.text or "")[:60],
         )
 
-        # ── 1. Source-group gate (account-specific) ───────────────
+        # ── 1. Source-group gate ──────────────────────────────────
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
             logger.debug(
                 "[monitor/acct%s] IGNORED (not a source group) | chat_id=%s | msg_id=%s",
@@ -251,19 +252,13 @@ def _make_message_handler(assigned_client, account_num: int):
             )
             return
 
-    async def _on_new_message(event: events.NewMessage.Event) -> None:
-        # Spawn independent task — returns to Telethon immediately.
-        # This means every message is processed concurrently and no
-        # message has to wait for another message's handler to finish.
-        asyncio.create_task(_process_message(event))
-
         logger.info(
             "[monitor/acct%s] SOURCE GROUP HIT | chat_id=%s | msg_id=%s",
             account_num, chat_id, msg_id,
         )
 
-        # ── 2. Extract text (plain text or media caption) ─────────
-        text = message.text or message.caption or message.raw_text or ""
+        # ── 2. Extract text ───────────────────────────────────────
+        text: str = message.text or message.caption or message.raw_text or ""
         if not text.strip():
             logger.info(
                 "[monitor/acct%s] SKIPPED (no text/caption) | chat_id=%s | msg_id=%s",
@@ -272,8 +267,7 @@ def _make_message_handler(assigned_client, account_num: int):
             return
 
         # ── 2.5 Blocked-user gate ─────────────────────────────────
-        # Uses in-memory cache — O(1) frozenset lookup, no DB I/O.
-        sender_id = message.sender_id
+        sender_id: Optional[int] = message.sender_id
         if sender_id and db.is_blocked_cached(sender_id):
             logger.info(
                 "[monitor/acct%s] SKIPPED (blocked user) | user_id=%s | chat_id=%s | msg_id=%s",
@@ -282,31 +276,25 @@ def _make_message_handler(assigned_client, account_num: int):
             return
 
         # ── 3. Repost / forward duplicate check ───────────────────
-        _pending_original: Optional[tuple] = None
+        _pending_original: Optional[Tuple[int, int]] = None
         fwd = getattr(message, "fwd_from", None)
         if fwd is not None:
-            orig_chat = getattr(fwd, "from_id", None)
-            # channel_post      — set when forwarded from a channel
-            # saved_from_msg_id — set when forwarded from Saved Messages
-            # message_id        — set when forwarded from a group (was missing before)
-            orig_msg  = (
+            orig_chat    = getattr(fwd, "from_id", None)
+            orig_msg: Optional[int] = (
                 getattr(fwd, "channel_post", None)
                 or getattr(fwd, "saved_from_msg_id", None)
                 or getattr(fwd, "message_id", None)
             )
-            orig_chat_id = None
+            orig_chat_id: Optional[int] = None
             if orig_chat is not None:
-                orig_chat_id = (
+                _raw_id: Optional[int] = (
                     getattr(orig_chat, "channel_id", None)
                     or getattr(orig_chat, "user_id",    None)
                     or getattr(orig_chat, "chat_id",    None)
                 )
-                if orig_chat_id:
-                    orig_chat_id = (
-                        int(f"-100{orig_chat_id}")
-                        if orig_chat_id > 0 else orig_chat_id
-                    )
-            if orig_chat_id and orig_msg:
+                if _raw_id is not None:
+                    orig_chat_id = int(f"-100{_raw_id}") if _raw_id > 0 else _raw_id
+            if orig_chat_id is not None and orig_msg is not None:
                 if db.is_repost(orig_chat_id, orig_msg):
                     logger.info(
                         "[monitor/acct%s] SKIPPED (repost duplicate) | "
@@ -333,23 +321,19 @@ def _make_message_handler(assigned_client, account_num: int):
             )
             return
 
-        # ── 5.1 Pre-resolve group metadata (O(1), no API call) ──────────
-        # Guruh nomi va vaqt DB dan bepul olinadi. Sender resolve va Groq
-        # tekshiruvi kerak bo'lgandagina va parallel amalga oshiriladi.
-        _stored_group    = db.get_source_group_by_id(chat_id)
-        _pre_group_title = _stored_group.title if _stored_group else "Unknown Group"
-        _pre_group_link  = (
+        # ── 5.1 Pre-resolve group metadata ───────────────────────
+        _stored_group     = db.get_source_group_by_id(chat_id)
+        _pre_group_title: str = _stored_group.title if _stored_group else "Unknown Group"
+        _pre_group_link: str  = (
             f"https://t.me/{_stored_group.username}"
             if _stored_group and _stored_group.username else ""
         )
         _pre_msg_time = message.date
         if _pre_msg_time and _pre_msg_time.tzinfo is None:
             _pre_msg_time = _pre_msg_time.replace(tzinfo=timezone.utc)
-        _pre_msg_time_str = _pre_msg_time.isoformat() if _pre_msg_time else ""
+        _pre_msg_time_str: str = _pre_msg_time.isoformat() if _pre_msg_time else ""
 
-        # ── 5.2 Keyword-based halal pre-filter ───────────────────────────
-        # Bu gate API chaqiruvisiz ishlaydi — eng tez bloklash yo'li.
-        # Harom topilsa: sender resolve qilinadi (review uchun), keyin qaytiladi.
+        # ── 5.2 Keyword-based halal pre-filter ───────────────────
         haram_kw = is_haram_job(text)
         if haram_kw.is_haram:
             _kw_sender = None
@@ -372,70 +356,45 @@ def _make_message_handler(assigned_client, account_num: int):
                 group_title=_pre_group_title,
                 group_link=_pre_group_link,
                 author_name=get_sender_display_name(_kw_sender),
-                author_link=(
-                    get_user_link(_kw_sender)
-                    if isinstance(_kw_sender, User) else ""
-                ) or "",
+                author_link=(get_user_link(_kw_sender) if isinstance(_kw_sender, User) else "") or "",
                 msg_time=_pre_msg_time_str,
             )
             if sent:
                 db.mark_processed(chat_id, msg_id)
             return
 
-        # ── 5.3 + 5.5  Sender resolve  &  content dedup — PARALLEL ─────────
+        # ── 5.3 + 5.5 Sender resolve & content dedup — PARALLEL ──
         #
-        # Ilgari: get_sender() (~200ms) va dedup (~50ms) ketma-ket = ~250ms.
-        # Endi:   asyncio.gather() bilan ikkalasi parallel = ~200ms (max).
-        #
-        # Exact-hash check (Tier 1, O(1)) avval sinxron tekshiriladi —
-        # duplicate bo'lsa API chaqiruvlarga ketmasdan darhol qaytiladi.
+        # content_hash avval None sifatida e'lon qilinadi — Pylance
+        # "possibly unbound" xatosini ko'rmaydi.
         content_hash: Optional[str] = None
-        _pre_sender: Optional[object] = None
 
-        # Tier 1 exact-hash sinxron — O(1), DB I/O yo'q (in-memory)
         if DEDUP_WINDOW_HOURS > 0:
             content_hash = db._content_hash(text)
             if content_hash in _pending_hashes:
                 logger.info(
-                    "[monitor/acct%s] SKIPPED (in-flight duplicate) | "
-                    "chat_id=%s | msg_id=%s",
+                    "[monitor/acct%s] SKIPPED (in-flight duplicate) | chat_id=%s | msg_id=%s",
                     account_num, chat_id, msg_id,
                 )
                 return
             _pending_hashes.add(content_hash)
 
-        # get_sender() va fuzzy dedup birga parallel
-        async def _do_get_sender():
-            try:
-                return await event.get_sender()
-            except Exception:
-                return None
-
-        async def _do_dedup():
-            if DEDUP_WINDOW_HOURS <= 0 or content_hash is None:
-                return False, ""
-            return db.is_content_duplicate(
-                text,
-                window_hours=DEDUP_WINDOW_HOURS,
-                similarity_threshold=DEDUP_SIMILARITY_THRESHOLD,
-            )
-
+        # Top-level funksiyalar ishlatiladi — nested def yo'q, Pylance xursand
         _pre_sender, (is_dup, dup_reason) = await asyncio.gather(
-            _do_get_sender(), _do_dedup()
+            _resolve_sender(event),
+            _check_content_duplicate(text, content_hash),
         )
 
         if is_dup:
-            if content_hash:
+            if content_hash is not None:
                 _pending_hashes.discard(content_hash)
             logger.info(
-                "[monitor/acct%s] SKIPPED (content duplicate) | %s | "
-                "chat_id=%s | msg_id=%s",
+                "[monitor/acct%s] SKIPPED (content duplicate) | %s | chat_id=%s | msg_id=%s",
                 account_num, dup_reason, chat_id, msg_id,
             )
             return
 
-        # Confirmed job post — safe to register origin
-        if _pending_original:
+        if _pending_original is not None:
             db.mark_original(*_pending_original)
 
         logger.info(
@@ -445,25 +404,19 @@ def _make_message_handler(assigned_client, account_num: int):
         )
 
         # ── 6. Resolve entities ───────────────────────────────────
-        # Fix 2: _pre_sender allaqachon Gate 5.1 da olingan — qayta get_sender()
-        # chaqirmaslik kerak. Bu har halol xabar uchun 100-500ms tejaydi.
-        # group_title ham DB dan allaqachon olingan (_pre_group_title).
-        group_title = _pre_group_title
-        group_link  = _pre_group_link or None
+        group_title: str          = _pre_group_title
+        group_link: Optional[str] = _pre_group_link or None
 
         if not group_title or group_title == "Unknown Group":
-            # DB da topilmasa — Telegram API dan olish (kam uchraydi)
             try:
                 chat        = await event.get_chat()
                 group_title = get_chat_display_name(chat)
                 group_link  = get_chat_link(chat)
             except Exception as exc:
-                logger.warning(
-                    "[monitor/acct%s] Could not resolve chat: %s", account_num, exc
-                )
+                logger.warning("[monitor/acct%s] Could not resolve chat: %s", account_num, exc)
 
         group_title = group_title or "Unknown Group"
-        author_name = get_sender_display_name(_pre_sender)
+        author_name: str          = get_sender_display_name(_pre_sender)
         author_link: Optional[str] = (
             get_user_link(_pre_sender) if isinstance(_pre_sender, User) else None
         )
@@ -476,7 +429,6 @@ def _make_message_handler(assigned_client, account_num: int):
             msg_time = utcnow()
 
         # ── 8. Resolve target ─────────────────────────────────────
-        # Uses in-memory cache — no DB I/O on the hot path.
         target = db.get_cached_target_id()
         if not target:
             await notify_admin(
@@ -501,17 +453,8 @@ def _make_message_handler(assigned_client, account_num: int):
 
             if sent_msg:
                 db.mark_processed(chat_id, msg_id)
-                # Register content fingerprint AFTER successful send so that
-                # a failed send never permanently blacklists content.
                 if DEDUP_WINDOW_HOURS > 0:
                     db.record_content_hash(text, source_chat=chat_id, source_msg=msg_id)
-                # "Odam olindi" feature: target_msg_id ni DB ga saqlaymiz.
-                # safe_send_message now returns the sent Message object directly,
-                # so we read sent_msg.id here — no extra get_messages() API call
-                # needed. The old approach (get_messages after send) was both slow
-                # (~300 ms per post) and racey: if another message landed in the
-                # target group between send and fetch, the wrong ID was stored,
-                # silently breaking the "ODAM OLINDI" edit feature.
                 try:
                     db.save_forwarded_msg(
                         source_chat=chat_id,
@@ -523,6 +466,7 @@ def _make_message_handler(assigned_client, account_num: int):
                     )
                 except Exception as _exc:
                     logger.warning("[monitor] Could not save forwarded_msg id: %s", _exc)
+
                 logger.info(
                     "[monitor/acct%s] ✅ FORWARDED | chat=%s | msg=%s → target=%s | target_msg_id=%s",
                     account_num, chat_id, msg_id, target, sent_msg.id,
@@ -534,9 +478,6 @@ def _make_message_handler(assigned_client, account_num: int):
                     matched_kw=", ".join(result.matched_keywords),
                     match_tier=result.match_tier,
                 )
-                # ── Groq background check ───────────────────────────────────────
-                # Post allaqachon guruhga yuborildi. Groq fon rejimida
-                # tekshiradi — haram bo'lsa postni o'chirib adminga xabar beradi.
                 if db.is_ai_filter_enabled() and bool(GROQ_API_KEY):
                     asyncio.create_task(
                         _background_groq_check(
@@ -566,22 +507,20 @@ def _make_message_handler(assigned_client, account_num: int):
                     f"Target: <code>{target}</code>"
                 )
         finally:
-            # Always release the pending-hash lock regardless of outcome.
-            # On success: hash is now in the DB so future duplicates are caught there.
-            # On failure: release so a manual retry or the next occurrence can go through.
-            if content_hash:
+            if content_hash is not None:
                 _pending_hashes.discard(content_hash)
+
+    async def _on_new_message(event: events.NewMessage.Event) -> None:
+        # Faqat task yaratadi — hech qanday o'zgaruvchi ishlatmaydi.
+        asyncio.create_task(_process_message(event))
 
     return _on_new_message
 
 
-# ── Background Groq halal check ───────────────────────────────────────────────
-# Post allaqachon target guruhga yuborilgan. Bu funksiya fon rejimida ishlaydi.
-# Haram yoki noaniq: (1) postni o'chiradi, (2) adminga review yuboradi.
-# Halol: hech narsa qilmaydi.
+# ── Background Groq halal check ───────────────────────────────────
 
 async def _background_groq_check(
-    client,
+    client: object,
     target: int,
     target_msg_id: int,
     source_chat: int,
@@ -615,15 +554,13 @@ async def _background_groq_check(
 
         verdict_label = "harom" if groq_result.verdict == "haram" else "noaniq"
         logger.info(
-            "[monitor/acct%s] bg-Groq: %s | reason=%s | "
-            "source=%s/%s → deleting target_msg=%s",
+            "[monitor/acct%s] bg-Groq: %s | reason=%s | source=%s/%s → deleting target_msg=%s",
             account_num, groq_result.verdict, groq_result.reason,
             source_chat, source_msg, target_msg_id,
         )
 
-        # Target guruhdan o'chirish
         try:
-            await client.delete_messages(target, [target_msg_id])
+            await client.delete_messages(target, [target_msg_id])  # type: ignore[attr-defined]
             logger.info(
                 "[monitor/acct%s] bg-Groq: deleted target_msg=%s",
                 account_num, target_msg_id,
@@ -634,7 +571,6 @@ async def _background_groq_check(
                 account_num, target_msg_id, del_exc,
             )
 
-        # Adminga review queue
         await _send_to_review(
             text=text,
             source_chat=source_chat,
@@ -649,14 +585,10 @@ async def _background_groq_check(
         )
 
     except Exception as exc:
-        logger.error(
-            "[monitor/acct%s] bg-Groq check crashed: %s",
-            account_num, exc,
-        )
+        logger.error("[monitor/acct%s] bg-Groq check crashed: %s", account_num, exc)
 
 
 # ── Handler 2: auto-delete join/leave service messages ────────────
-# Only needs to run on client_1 — whichever account is in the target group.
 
 async def _on_chat_action(event: events.ChatAction.Event) -> None:
     target_id = _get_target_id()
@@ -693,52 +625,36 @@ async def _on_chat_action(event: events.ChatAction.Event) -> None:
     try:
         await client_1.delete_messages(target_id, [action.id])
     except Exception as exc:
-        logger.warning(
-            "[monitor] Could not delete service message %s: %s",
-            action.id, exc,
-        )
+        logger.warning("[monitor] Could not delete service message %s: %s", action.id, exc)
 
 
-# ── Handler 3: "Odam olindi" — reply yoki edit orqali ────────────
-#
-# Ikkita holat kuzatiladi:
-#   A) Manba guruhda ish e'loniga kimdir reply qilib "odam olindi" desa
-#   B) Ish beruvchi o'z xabarini edit qilib matniga "odam olindi" qo'shsa
-#
-# Ikkalasida ham target guruhda yuborilgan forward postga
-# "🔴 ODAM OLINDI" qo'shimcha qo'yiladi (edit orqali).
+# ── Handler 3: "Odam olindi" ─────────────────────────────────────
 
 async def _mark_filled_in_target(
-    assigned_client,
+    assigned_client: object,
     source_chat: int,
     source_msg: int,
 ) -> None:
-    """
-    DB dan target_msg_id ni topib, target guruhda o'sha postni edit qiladi.
-    Telegram 48 soatdan eski xabarlarni edit qilmaydi — bu holda log yozadi.
-    """
     record = db.get_forwarded_msg(source_chat, source_msg)
     if not record:
         logger.debug(
             "[monitor] filled signal — source msg not in forwarded_msgs "
-            "source_chat=%s source_msg=%s", source_chat, source_msg
+            "source_chat=%s source_msg=%s", source_chat, source_msg,
         )
         return
 
-    target_chat   = record["target_chat"]
-    target_msg_id = record["target_msg_id"]
-    old_text      = record["post_text"] or ""
+    target_chat:   int = record["target_chat"]
+    target_msg_id: int = record["target_msg_id"]
+    old_text:      str = record["post_text"] or ""
 
-    # Eski matnning oxiriga "ODAM OLINDI" separator qo'shamiz
     separator = "\n\n─────────────────\n🔴 <b>ODAM OLINDI</b>"
     if "ODAM OLINDI" in old_text:
         logger.debug("[monitor] Already marked filled: target_msg_id=%s", target_msg_id)
         return
 
     new_text = old_text + separator
-
     try:
-        await assigned_client.edit_message(
+        await assigned_client.edit_message(  # type: ignore[attr-defined]
             entity=target_chat,
             message=target_msg_id,
             text=new_text,
@@ -757,32 +673,27 @@ async def _mark_filled_in_target(
                 target_msg_id,
             )
         else:
-            logger.warning(
-                "[monitor] Failed to edit filled message %s: %s",
-                target_msg_id, exc,
-            )
+            logger.warning("[monitor] Failed to edit filled message %s: %s", target_msg_id, exc)
 
 
-def _make_filled_handlers(assigned_client, account_num: int):
+def _make_filled_handlers(assigned_client: object, account_num: int):  # type: ignore[type-arg]
     """
-    Ikkita event handler qaytaradi:
-      1. on_reply  — ish e'loniga "odam olindi" deb reply qilinsa
-      2. on_edited — ish e'loni tahrirlansa va "odam olindi" qo'shilsa
+    Uchta event handler qaytaradi:
+      1. on_reply    — ish e'loniga "odam olindi" deb reply qilinsa
+      2. on_edited   — ish e'loni edit qilinsa va signal matn bo'lsa
+      3. on_no_reply — reply bo'lmay, sender o'zi yozsa
     """
+
     async def _on_reply(event: events.NewMessage.Event) -> None:
-        """Kimdir source guruhda ish e'loniga reply qildi."""
         message = event.message
-        chat_id = event.chat_id
+        chat_id: int = event.chat_id
 
-        # Faqat kuzatilayotgan manba guruhlardan
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
             return
-
-        # Faqat reply bo'lsa
         if not message.reply_to_msg_id:
             return
 
-        text = getattr(message, 'text', None) or getattr(message, 'caption', None) or ""
+        text: str = getattr(message, "text", None) or getattr(message, "caption", None) or ""
         if not _is_filled_signal(text):
             return
 
@@ -797,14 +708,13 @@ def _make_filled_handlers(assigned_client, account_num: int):
         )
 
     async def _on_edited(event: events.MessageEdited.Event) -> None:
-        """Ish beruvchi o'z xabarini edit qildi."""
         message = event.message
-        chat_id = event.chat_id
+        chat_id: int = event.chat_id
 
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
             return
 
-        text = getattr(message, 'text', None) or getattr(message, 'caption', None) or ""
+        text: str = getattr(message, "text", None) or getattr(message, "caption", None) or ""
         if not _is_filled_signal(text):
             return
 
@@ -819,35 +729,23 @@ def _make_filled_handlers(assigned_client, account_num: int):
         )
 
     async def _on_no_reply(event: events.NewMessage.Event) -> None:
-        """
-        Reply bo'lmagan holat: ish beruvchining o'zi guruhda shunchaki
-        'odam olindi' deb yozadi. Sender ID orqali uning guruhda
-        eng so'nggi forward qilingan postini topib edit qilamiz.
-        """
         message = event.message
-        chat_id = event.chat_id
+        chat_id: int = event.chat_id
 
-        # Faqat kuzatilayotgan manba guruhlardan
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
             return
-
-        # Reply bo'lmagan holat — reply bo'lsa _on_reply handler oladi
         if message.reply_to_msg_id:
             return
 
-        text = message.text or message.caption or ""
+        text: str = message.text or message.caption or ""
         if not _is_filled_signal(text):
             return
 
-        sender_id = message.sender_id
+        sender_id: Optional[int] = message.sender_id
         if not sender_id:
             return
 
-        # O'sha sender_id dan shu guruhda eng oxirgi forward qilingan post
-        record = db.get_last_forwarded_by_sender(
-            source_chat=chat_id,
-            sender_id=sender_id,
-        )
+        record = db.get_last_forwarded_by_sender(source_chat=chat_id, sender_id=sender_id)
         if not record:
             logger.debug(
                 "[monitor/acct%s] FILLED no-reply — no recent post found for sender=%s chat=%s",
@@ -872,8 +770,6 @@ def _make_filled_handlers(assigned_client, account_num: int):
 
 async def setup_monitor() -> None:
     """Start all clients and register event handlers."""
-    # Fix 7: Startupda _pending_hashes tozalanadi — avvalgi crash dan qolgan
-    # yozuvlar yangi sessiyada xabarlarni noto'g'ri bloklashini oldini oladi.
     _pending_hashes.clear()
     phone_numbers = {1: PHONE_NUMBER, 2: PHONE_NUMBER_2 or PHONE_NUMBER}
 
@@ -886,38 +782,27 @@ async def setup_monitor() -> None:
             account_num, me.first_name, me.id,
         )
 
-        # Register the account-specific message handler
         handler = _make_message_handler(client, account_num)
         client.add_event_handler(handler, events.NewMessage())
 
-        # "Odam olindi" handlerlarini ro'yxatdan o'tkazish
         on_reply, on_edited, on_no_reply = _make_filled_handlers(client, account_num)
         client.add_event_handler(on_reply,    events.NewMessage())
         client.add_event_handler(on_no_reply, events.NewMessage())
         client.add_event_handler(on_edited,   events.MessageEdited())
 
         groups = db.list_source_groups(account=account_num)
-        logger.info(
-            "[monitor] Account %s monitoring %d group(s)",
-            account_num, len(groups),
-        )
+        logger.info("[monitor] Account %s monitoring %d group(s)", account_num, len(groups))
 
-        # ── Startup validation: catch bad IDs before they silently fail ──
-        # Any group with a positive chat_id is missing the -100 supergroup
-        # prefix. Telegram delivers events as -100XXXXXXXXX, so a positive
-        # stored ID never matches and monitoring silently does nothing.
         bad_ids = [g for g in groups if g.chat_id > 0]
         if bad_ids:
             logger.error(
-                "[monitor] ⚠️  Account %s has %d group(s) with INVALID positive "
-                "chat_id — these will never match incoming events! "
+                "[monitor] ⚠️  Account %s has %d group(s) with INVALID positive chat_id "
+                "— these will never match incoming events! "
                 "Run fix_chat_ids.py to repair them. Affected: %s",
-                account_num,
-                len(bad_ids),
+                account_num, len(bad_ids),
                 [(g.chat_id, g.title) for g in bad_ids],
             )
 
-    # Chat-action handler only on client_1
     client_1.add_event_handler(_on_chat_action, events.ChatAction())
 
     target = db.get_target_group()
