@@ -124,11 +124,12 @@ def get_chat_display_name(chat) -> str:
 #      → Telegram never issues FloodWait
 #      → 1 post = instant, 5 posts = 0s/3s/6s/9s/12s
 
-MAX_RETRIES   = 3
-RETRY_DELAY   = 5
-_send_lock    : Any   = None   # created lazily inside event loop
-_last_send_at : float = 0.0
-_SEND_MIN_GAP : float = 3.1    # seconds — keeps us under Telegram's limit
+MAX_RETRIES    = 3
+RETRY_DELAY    = 5
+_send_lock     : Any   = None
+_last_send_at  : float = 0.0
+_flood_until   : float = 0.0    # time.monotonic() when active FloodWait expires
+_SEND_MIN_GAP  : float = 3.1    # seconds between sends (Telegram ~20/min limit)
 
 
 async def safe_send_message(
@@ -137,25 +138,48 @@ async def safe_send_message(
     text: str,
 ) -> Optional[Any]:
     """
-    Send in HTML mode with rate limiting and retry.
+    Send in HTML mode with rate limiting, proper FloodWait handling, and retry.
 
-    Rate limiting: enforces 3.1s minimum between sends (prevents FloodWait).
-    A single isolated post has zero extra wait.
-    Returns sent Message object on success, None on failure.
+    THE FIX FOR 6-MINUTE DELAYS:
+    The old code held asyncio.Lock during FloodWait sleep. All other messages
+    were blocked for the full FloodWait duration (e.g. 360 seconds) while
+    waiting to acquire the lock.
+
+    New design uses _flood_until: tasks check it BEFORE acquiring the lock
+    and wait OUTSIDE the lock. During a 360s FloodWait:
+      Old: all N tasks blocked 360s + N*3.1s = up to 10 minutes
+      New: all tasks wait ~360s (in parallel, outside lock) = ~360s max
     """
     from telethon.errors import FloodWaitError
-    global _send_lock, _last_send_at
+    global _send_lock, _last_send_at, _flood_until
 
     if _send_lock is None:
         _send_lock = asyncio.Lock()
 
+    # Step 1: wait for active FloodWait OUTSIDE the lock
+    # This is the critical fix — tasks wait in parallel, not sequentially
+    now = time.monotonic()
+    if _flood_until > now:
+        remaining = _flood_until - now
+        logger.info(
+            "[utils] FloodWait active: waiting %.0fs outside lock", remaining,
+        )
+        await asyncio.sleep(remaining)
+
     async with _send_lock:
+        # Step 2: re-check inside lock (another task may have triggered FloodWait)
+        now = time.monotonic()
+        if _flood_until > now:
+            await asyncio.sleep(_flood_until - now)
+
+        # Step 3: rate-limit gap (prevents rapid burst → FloodWait)
         elapsed = time.monotonic() - _last_send_at
         if _last_send_at > 0 and elapsed < _SEND_MIN_GAP:
             gap = _SEND_MIN_GAP - elapsed
             logger.debug("[utils] rate-limit pause %.2fs", gap)
             await asyncio.sleep(gap)
 
+        # Step 4: send with retry
         attempt = 0
         while attempt < MAX_RETRIES:
             attempt += 1
@@ -168,12 +192,14 @@ async def safe_send_message(
 
             except FloodWaitError as e:
                 wait = e.seconds + 5
+                _flood_until = time.monotonic() + wait   # signal other tasks
                 logger.warning(
-                    "[utils] FloodWait %ds (attempt %d/%d) — sleeping %ds",
-                    e.seconds, attempt, MAX_RETRIES, wait,
+                    "[utils] FloodWait %ds — sleeping (others wait outside lock)",
+                    e.seconds,
                 )
                 await asyncio.sleep(wait)
-                attempt -= 1
+                _flood_until = 0.0   # clear after our sleep
+                attempt -= 1         # FloodWait does not count as a retry
 
             except Exception as exc:
                 logger.warning(
@@ -184,7 +210,6 @@ async def safe_send_message(
 
         logger.error("[utils] All %d attempts failed — message dropped.", MAX_RETRIES)
         return None
-
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)

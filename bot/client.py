@@ -31,6 +31,17 @@ def _make_client(session) -> TelegramClient:
         retry_delay=5,
         timeout=30,
         auto_reconnect=True,
+        # Fix: process updates concurrently instead of one-by-one.
+        # With sequential_updates=True (default), Telethon waits for each
+        # handler to finish before dispatching the next update. Since our
+        # handler now returns instantly (create_task), this is fast. But
+        # False gives extra concurrency for accounts with many groups.
+        sequential_updates=False,
+        # Fix: don't let Telethon auto-sleep on FloodWait.
+        # We handle FloodWait ourselves in utils.safe_send_message.
+        # Telethon's auto-sleep blocks the entire update loop for that
+        # duration — our approach releases the send queue properly.
+        flood_sleep_threshold=0,
     )
 
 
