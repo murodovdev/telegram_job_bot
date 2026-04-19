@@ -56,7 +56,8 @@ logger = logging.getLogger(__name__)
 _FILLED_KEYWORDS: list = [
     # O'zbekcha
     "odam olindi", "olindi", "olind", "band bo'ldi", "band boldi", "to'ldi", "toldi",
-    "tugadi", "yopildi", "ishchi topildi", "aktual emas", "olingan", "band", "topildi", "yopilyapti", "bitdi", "Ishga olindi",
+    "tugadi", "yopildi", "ishchi topildi", "aktual emas", "kerak emas",
+    "olingan", "band", "topildi", "yopilyapti", "bitdi", "Ishga olindi",
     # Ruscha
     "взяли", "занято", "нашли", "закрыто", "не актуально", "нашли человека",
     "место занято", "уже нашли", "закрыта", "набрали",
@@ -228,28 +229,55 @@ def _make_message_handler(assigned_client, account_num: int):
     """
     Return a NewMessage event handler bound to a specific client and account.
 
-    The handler only processes messages from source groups that are assigned
-    to account_num in the database — the two accounts never step on each other.
+    _on_new_message is a THIN wrapper — it just spawns _process_message as
+    an independent asyncio.Task and returns immediately to Telethon.
+    This means Telethon's update loop is never blocked, and every message
+    is processed concurrently. No message waits for another to finish.
     """
-    async def _on_new_message(event: events.NewMessage.Event) -> None:
-        message: Message = event.message
+def _make_message_handler(assigned_client, account_num: int):
+    """
+    Return a NewMessage event handler for one Telethon client.
+
+    Architecture (two-layer):
+    ┌─ _on_new_message ──────────────────────────────────────────┐
+    │  Thin wrapper registered with Telethon.                    │
+    │  Creates an independent asyncio task and returns           │
+    │  IMMEDIATELY to Telethon's update loop.                    │
+    │  Zero blocking time — Telethon never waits.                │
+    └────────────────────────────────────────────────────────────┘
+    ┌─ _process_message ──────────────────────────────────────────┐
+    │  Full 9-gate pipeline, runs concurrently as a Task.        │
+    │  Multiple messages processed in parallel — no queuing.     │
+    └────────────────────────────────────────────────────────────┘
+
+    Additionally, setup_monitor() registers handlers with
+    events.NewMessage(chats=source_ids) so Telethon pre-filters
+    at the protocol level — personal groups/channels never even
+    reach this handler.
+    """
+    async def _process_message(event: events.NewMessage.Event) -> None:
+        """Full pipeline — runs as an independent asyncio.Task."""
+        from telethon.tl.types import MessageService
+
+        message = event.message
         chat_id = event.chat_id
         msg_id  = message.id
 
+        # ── 0. Skip non-text service messages (join/leave events) ─
+        # MessageService objects have no .text/.caption — they crash Gate 2.
+        if isinstance(message, MessageService):
+            return
+
         logger.debug(
             "[monitor/acct%s] MSG RECEIVED | chat_id=%-20s | msg_id=%-8s | preview=%r",
-            account_num, chat_id, msg_id, (message.text or "")[:60],
+            account_num, chat_id, msg_id,
+            (getattr(message, "text", None) or "")[:60],
         )
 
-        # ── 1. Source-group gate (account-specific) ───────────────
-        # Uses the in-memory cache — O(1) frozenset lookup, no DB I/O,
-        # no event-loop blocking. Called on every incoming message so
-        # this is the single most performance-critical line in the bot.
+        # ── 1. Source-group gate ───────────────────────────────────
+        # Safety net — Telethon's chats= filter already pre-filters.
+        # This protects against edge cases (cache stale, etc.).
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
-            logger.debug(
-                "[monitor/acct%s] IGNORED (not a source group) | chat_id=%s | msg_id=%s",
-                account_num, chat_id, msg_id,
-            )
             return
 
         logger.info(
@@ -258,7 +286,7 @@ def _make_message_handler(assigned_client, account_num: int):
         )
 
         # ── 2. Extract text (plain text or media caption) ─────────
-        text = message.text or message.caption or message.raw_text or ""
+        text = getattr(message, "text", None) or getattr(message, "caption", None) or getattr(message, "raw_text", None) or ""
         if not text.strip():
             logger.info(
                 "[monitor/acct%s] SKIPPED (no text/caption) | chat_id=%s | msg_id=%s",
@@ -567,6 +595,10 @@ def _make_message_handler(assigned_client, account_num: int):
             if content_hash:
                 _pending_hashes.discard(content_hash)
 
+    async def _on_new_message(event: events.NewMessage.Event) -> None:
+        """Thin wrapper — spawns task, returns to Telethon immediately."""
+        asyncio.create_task(_process_message(event))
+
     return _on_new_message
 
 
@@ -777,7 +809,7 @@ def _make_filled_handlers(assigned_client, account_num: int):
         if not message.reply_to_msg_id:
             return
 
-        text = message.text or message.caption or ""
+        text = getattr(message, "text", None) or getattr(message, "caption", None) or ""
         if not _is_filled_signal(text):
             return
 
@@ -799,7 +831,7 @@ def _make_filled_handlers(assigned_client, account_num: int):
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
             return
 
-        text = message.text or message.caption or ""
+        text = getattr(message, "text", None) or getattr(message, "caption", None) or ""
         if not _is_filled_signal(text):
             return
 
@@ -830,7 +862,7 @@ def _make_filled_handlers(assigned_client, account_num: int):
         if message.reply_to_msg_id:
             return
 
-        text = message.text or message.caption or ""
+        text = getattr(message, "text", None) or getattr(message, "caption", None) or ""
         if not _is_filled_signal(text):
             return
 
@@ -881,15 +913,34 @@ async def setup_monitor() -> None:
             account_num, me.first_name, me.id,
         )
 
-        # Register the account-specific message handler
-        handler = _make_message_handler(client, account_num)
-        client.add_event_handler(handler, events.NewMessage())
+        # ── Register handlers with source-group chat filter ─────────
+        # THE KEY FIX for 12-minute delays:
+        #
+        # events.NewMessage() with NO filter = Telethon delivers EVERY message
+        # from EVERY group/channel/chat the account is in (500+ personal groups).
+        # Each message goes through the handler even if it's from a personal chat.
+        # When hundreds of irrelevant messages queue up, source-group messages
+        # wait behind them — causing 10-12 minute delays.
+        #
+        # events.NewMessage(chats=source_ids) = Telegram filters at PROTOCOL level.
+        # Only messages from the 40 source groups ever reach the handler.
+        # Personal groups, channels, bots — completely invisible to the handler.
+        # Result: zero queue, instant detection.
+        source_ids = [g.chat_id for g in groups]
 
-        # "Odam olindi" handlerlarini ro'yxatdan o'tkazish
+        handler = _make_message_handler(client, account_num)
+        client.add_event_handler(handler, events.NewMessage(chats=source_ids))
+
+        # "Odam olindi" handlers — same chats= filter
         on_reply, on_edited, on_no_reply = _make_filled_handlers(client, account_num)
-        client.add_event_handler(on_reply,    events.NewMessage())
-        client.add_event_handler(on_no_reply, events.NewMessage())
-        client.add_event_handler(on_edited,   events.MessageEdited())
+        client.add_event_handler(on_reply,    events.NewMessage(chats=source_ids))
+        client.add_event_handler(on_no_reply, events.NewMessage(chats=source_ids))
+        client.add_event_handler(on_edited,   events.MessageEdited(chats=source_ids))
+
+        logger.info(
+            "[monitor] Account %s: chats= filter set for %d source groups",
+            account_num, len(source_ids),
+        )
 
         groups = db.list_source_groups(account=account_num)
         logger.info(
