@@ -926,6 +926,7 @@ async def setup_monitor() -> None:
         # Only messages from the 40 source groups ever reach the handler.
         # Personal groups, channels, bots — completely invisible to the handler.
         # Result: zero queue, instant detection.
+        groups = db.list_source_groups(account=account_num)
         source_ids = [g.chat_id for g in groups]
 
         handler = _make_message_handler(client, account_num)
@@ -938,14 +939,8 @@ async def setup_monitor() -> None:
         client.add_event_handler(on_edited,   events.MessageEdited(chats=source_ids))
 
         logger.info(
-            "[monitor] Account %s: chats= filter set for %d source groups",
+            "[monitor] Account %s: chats= filter active for %d source groups",
             account_num, len(source_ids),
-        )
-
-        groups = db.list_source_groups(account=account_num)
-        logger.info(
-            "[monitor] Account %s monitoring %d group(s)",
-            account_num, len(groups),
         )
 
         # ── Startup validation: catch bad IDs before they silently fail ──
