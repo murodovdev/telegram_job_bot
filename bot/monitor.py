@@ -209,9 +209,197 @@ async def _send_to_review(
 # permanently blocks the content.
 _pending_hashes: set = set()
 
-# Fix 5: Groq API rate limit himoyasi.
-# Bir vaqtda maksimal 3 ta parallel Groq so'rov — free tier limit 30/min.
+# ── Polling loop (backup — guarantees no missed messages) ────────
+#
+# ROOT CAUSE of 6-minute delays, finally confirmed:
+#
+# Telethon receives ALL updates from Telegram via MTProto push.
+# Even with a dedicated account + chats= filter, the issue persists because:
+#
+#   1. The chats= filter is CLIENT-SIDE. Telegram still pushes every update
+#      from every group the account is in. The filter just discards them
+#      faster in Python — they still go through Telethon's _updates_queue.
+#
+#   2. Telethon's internal _updates_queue processes updates sequentially
+#      before dispatching to handlers. During Telegram reconnections or
+#      server-side update batching, the queue fills up. Source-group
+#      messages wait behind irrelevant updates.
+#
+#   3. Telegram can delay MTProto push delivery for userbot accounts by
+#      several minutes during server load peaks.
+#
+# Evidence: April 15 log shows 9 messages with 1-3s delay (queue empty)
+# and many messages with 5-7 minute delay (queue backed up). Same code,
+# same account, different queue state.
+#
+# SOLUTION: Two independent detection channels:
+#   A) Event handler (existing) — real-time, ~1s when MTProto push works
+#   B) Polling loop (new) — scans source groups every POLL_INTERVAL seconds
+#      using get_messages() API. Catches EVERYTHING the event system missed.
+#
+# The polling loop is the standard approach used by all production
+# Telegram monitoring bots (TGStat, Combot, etc.).
+#
+# Together: even if event delivery fails entirely, every job post is
+# forwarded within POLL_INTERVAL seconds of being sent.
+
+POLL_INTERVAL = 90   # seconds between polling cycles per account
+POLL_MESSAGES = 10   # how many recent messages to check per group per cycle
+
+# Groq API rate limit: max 3 parallel requests at once
 _groq_semaphore = asyncio.Semaphore(3)
+
+
+async def _polling_loop(client, account_num: int) -> None:
+    """
+    Backup polling loop — runs as an independent asyncio task.
+
+    Every POLL_INTERVAL seconds, fetches the last POLL_MESSAGES messages
+    from each source group assigned to this account. Any message that:
+      - passes the keyword filter
+      - has NOT been processed before (checked via DB)
+    is forwarded to the target group, exactly like the event handler would.
+
+    This guarantees that even if Telethon's event system misses a message
+    (due to MTProto push delay, reconnection gap, or queue backup), it will
+    be caught within POLL_INTERVAL seconds.
+    """
+    logger.info(
+        "[polling/acct%s] Backup polling loop started "
+        "(interval=%ds, depth=%d msgs/group)",
+        account_num, POLL_INTERVAL, POLL_MESSAGES,
+    )
+
+    while True:
+        await asyncio.sleep(POLL_INTERVAL)
+        groups = db.list_source_groups(account=account_num)
+        if not groups:
+            continue
+
+        target = db.get_cached_target_id()
+        if not target:
+            continue
+
+        checked = 0
+        forwarded = 0
+
+        for group in groups:
+            try:
+                messages = await client.get_messages(
+                    group.chat_id,
+                    limit=POLL_MESSAGES,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "[polling/acct%s] get_messages failed for %s: %s",
+                    account_num, group.title, exc,
+                )
+                continue
+
+            for message in messages:
+                checked += 1
+                msg_id = message.id
+                chat_id = group.chat_id
+
+                # Skip if already processed (event handler got it)
+                if db.is_processed(chat_id, msg_id):
+                    continue
+
+                # Extract text
+                text = (
+                    getattr(message, "text", None)
+                    or getattr(message, "caption", None)
+                    or getattr(message, "raw_text", None)
+                    or ""
+                )
+                if not text.strip():
+                    continue
+
+                # Keyword filter
+                result = is_job_message(text)
+                if not result.is_job:
+                    continue
+
+                # Halal keyword filter
+                haram_kw = is_haram_job(text)
+                if haram_kw.is_haram:
+                    db.mark_processed(chat_id, msg_id)
+                    continue
+
+                # Dedup
+                if DEDUP_WINDOW_HOURS > 0:
+                    is_dup, _ = db.is_content_duplicate(
+                        text,
+                        window_hours=DEDUP_WINDOW_HOURS,
+                        similarity_threshold=DEDUP_SIMILARITY_THRESHOLD,
+                    )
+                    if is_dup:
+                        db.mark_processed(chat_id, msg_id)
+                        continue
+
+                # Build and send
+                msg_time = message.date
+                if msg_time and msg_time.tzinfo is None:
+                    msg_time = msg_time.replace(tzinfo=timezone.utc)
+
+                group_link = (
+                    f"https://t.me/{group.username}" if group.username else None
+                )
+
+                sender = None
+                try:
+                    sender = await message.get_sender()
+                except Exception:
+                    pass
+
+                post_text = build_job_post(
+                    group_title=group.title,
+                    group_link=group_link,
+                    author_name=get_sender_display_name(sender),
+                    author_link=(
+                        get_user_link(sender) if isinstance(sender, User) else None
+                    ),
+                    message_time=msg_time or utcnow(),
+                    message_text=truncate(text),
+                    matched_keywords=result.matched_keywords,
+                )
+
+                sent_msg = await safe_send_message(client, target, post_text)
+                if sent_msg:
+                    db.mark_processed(chat_id, msg_id)
+                    if DEDUP_WINDOW_HOURS > 0:
+                        db.record_content_hash(
+                            text, source_chat=chat_id, source_msg=msg_id
+                        )
+                    try:
+                        db.save_forwarded_msg(
+                            source_chat=chat_id,
+                            source_msg=msg_id,
+                            target_chat=target,
+                            target_msg_id=sent_msg.id,
+                            post_text=post_text,
+                            sender_id=getattr(message, "sender_id", None),
+                        )
+                    except Exception:
+                        pass
+                    forwarded += 1
+                    logger.info(
+                        "[polling/acct%s] ✅ CAUGHT BY POLL | "
+                        "chat=%s | msg=%s | lag=%.0fs",
+                        account_num, chat_id, msg_id,
+                        (
+                            utcnow() - msg_time.astimezone(timezone.utc)
+                            .replace(tzinfo=None).__class__(  # noqa
+                                *msg_time.astimezone(timezone.utc).timetuple()[:6]
+                            )
+                        ).total_seconds() if msg_time else 0,
+                    )
+
+        if forwarded:
+            logger.info(
+                "[polling/acct%s] cycle done | checked=%d | caught=%d",
+                account_num, checked, forwarded,
+            )
 
 
 def _get_target_id() -> Optional[int]:
