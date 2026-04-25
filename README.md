@@ -466,5 +466,4 @@ Pull requests are welcome. For major changes, please open an issue first.
 
 ---
 
-*Built for the Uzbek community in South Korea 🇺🇿🇰🇷*  
-*2,300+ active users — Korea Ish E'lonlari*
+*Built for the Uzbek community in South Korea 🇺🇿🇰🇷*
