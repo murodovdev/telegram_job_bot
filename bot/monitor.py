@@ -383,16 +383,17 @@ async def _polling_loop(client, account_num: int) -> None:
                     except Exception:
                         pass
                     forwarded += 1
+                    _poll_lag = 0.0
+                    if msg_time:
+                        try:
+                            _mt = msg_time if msg_time.tzinfo else msg_time.replace(tzinfo=timezone.utc)
+                            _poll_lag = (utcnow() - _mt).total_seconds()
+                        except Exception:
+                            pass
                     logger.info(
                         "[polling/acct%s] ✅ CAUGHT BY POLL | "
                         "chat=%s | msg=%s | lag=%.0fs",
-                        account_num, chat_id, msg_id,
-                        (
-                            utcnow() - msg_time.astimezone(timezone.utc)
-                            .replace(tzinfo=None).__class__(  # noqa
-                                *msg_time.astimezone(timezone.utc).timetuple()[:6]
-                            )
-                        ).total_seconds() if msg_time else 0,
+                        account_num, chat_id, msg_id, _poll_lag,
                     )
 
         if forwarded:
@@ -413,15 +414,6 @@ def _get_target_id() -> Optional[int]:
 
 # ── Handler factory ───────────────────────────────────────────────
 
-def _make_message_handler(assigned_client, account_num: int):
-    """
-    Return a NewMessage event handler bound to a specific client and account.
-
-    _on_new_message is a THIN wrapper — it just spawns _process_message as
-    an independent asyncio.Task and returns immediately to Telethon.
-    This means Telethon's update loop is never blocked, and every message
-    is processed concurrently. No message waits for another to finish.
-    """
 def _make_message_handler(assigned_client, account_num: int):
     """
     Return a NewMessage event handler for one Telethon client.
@@ -468,9 +460,18 @@ def _make_message_handler(assigned_client, account_num: int):
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
             return
 
+        # Measure how long Telegram took to deliver this update.
+        # delivery_lag > 5s means Telegram's push was delayed, not our code.
+        _lag = 0.0
+        if message.date:
+            try:
+                _md = message.date if message.date.tzinfo else message.date.replace(tzinfo=timezone.utc)
+                _lag = (utcnow() - _md).total_seconds()
+            except Exception:
+                pass
         logger.info(
-            "[monitor/acct%s] SOURCE GROUP HIT | chat_id=%s | msg_id=%s",
-            account_num, chat_id, msg_id,
+            "[monitor/acct%s] SOURCE GROUP HIT | chat_id=%s | msg_id=%s | delivery_lag=%.1fs",
+            account_num, chat_id, msg_id, _lag,
         )
 
         # ── 2. Extract text (plain text or media caption) ─────────
@@ -1129,6 +1130,16 @@ async def setup_monitor() -> None:
         logger.info(
             "[monitor] Account %s: chats= filter active for %d source groups",
             account_num, len(source_ids),
+        )
+
+        # Start backup polling loop — catches messages missed by event system
+        asyncio.create_task(
+            _polling_loop(client, account_num),
+            name=f"polling_acct{account_num}",
+        )
+        logger.info(
+            "[monitor] Account %s: backup polling started (every %ds)",
+            account_num, POLL_INTERVAL,
         )
 
         # ── Startup validation: catch bad IDs before they silently fail ──
