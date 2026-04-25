@@ -3489,3 +3489,44 @@ client_session: <aiohttp.client.ClientSession object at 0x000001465A0FB770>
 2026-04-22 16:32:08 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (content duplicate) | exact duplicate of msg 52521 in chat -1001749857007 | chat_id=-1001749857007 | msg_id=52546
 2026-04-22 16:32:09 | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1002044373140 | msg_id=16698
 2026-04-22 16:32:09 | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1002044373140 | msg_id=16698 | preview='Ассалому\xa0\xa0 алейкум\xa0 📣📣📣📣\n\n29➖\xa0АПРЕЛ ЧОРШАНБА КУНИ\n\nАНДИЖОН-ФАРГОНА-НАМАНГАН\n\nТОШ'
+2026-04-25 16:15:00 KST | INFO     | main                 | ============================================================
+2026-04-25 16:15:00 KST | INFO     | main                 |   Korea Ish E'lonlari — Starting
+2026-04-25 16:15:00 KST | INFO     | main                 |   Accounts active: 2
+2026-04-25 16:15:00 KST | INFO     | main                 | ============================================================
+2026-04-25 16:15:00 KST | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-04-25 16:15:00 KST | INFO     | bot.database         | [DB] Pruned 8 expired content_hashes rows
+2026-04-25 16:15:00 KST | INFO     | bot.database         | [DB] Pruned 1 old processed_msgs rows (keep_days=30)
+2026-04-25 16:15:00 KST | INFO     | bot.monitor          | [monitor] Connecting account 1 …
+2026-04-25 16:15:00 KST | INFO     | bot.monitor          | [monitor] Account 1 logged in as: Murodov</> (id=7919457789)
+2026-04-25 16:15:00 KST | INFO     | bot.monitor          | [monitor] Account 1: chats= filter active for 56 source groups
+2026-04-25 16:15:00 KST | INFO     | bot.monitor          | [monitor] Account 1: backup polling started (every 15s)
+2026-04-25 16:15:00 KST | INFO     | bot.monitor          | [monitor] Connecting account 2 …
+2026-04-25 16:15:00 KST | INFO     | bot.monitor          | [polling/acct1] Backup polling loop started (interval=15s, depth=15 msgs/group, parallel)
+2026-04-25 16:15:02 KST | INFO     | bot.monitor          | [monitor] Account 2 logged in as: 무로토브 (id=8367892539)
+2026-04-25 16:15:02 KST | INFO     | bot.monitor          | [monitor] Account 2: chats= filter active for 0 source groups
+2026-04-25 16:15:02 KST | INFO     | bot.monitor          | [monitor] Account 2: backup polling started (every 15s)
+2026-04-25 16:15:02 KST | INFO     | bot.monitor          | [monitor] Target: Korea Ish E'lonlari (-1003744320676)
+2026-04-25 16:15:02 KST | INFO     | bot.monitor          | [monitor] 👂 Listening on 2 account(s) …
+2026-04-25 16:15:02 KST | INFO     | main                 | [main] Starting admin bot and scheduler …
+2026-04-25 16:15:02 KST | INFO     | main                 | [main] ✅ All systems running. Press Ctrl+C to stop.
+2026-04-25 16:15:02 KST | INFO     | bot.monitor          | [polling/acct2] Backup polling loop started (interval=15s, depth=15 msgs/group, parallel)
+2026-04-25 16:15:02 KST | INFO     | bot.database         | [DB] Schema initialised at D:\VS Code\telegram_job_bot\data\job_bot.db
+2026-04-25 16:15:03 KST | INFO     | bot.admin_bot        | [admin_bot] Starting admin bot …
+2026-04-25 16:15:03 KST | INFO     | bot.scheduler        | [scheduler] Daily summary scheduler started (fires at 21:00 KST).
+2026-04-25 16:15:03 KST | INFO     | bot.scheduler        | [scheduler] Next daily summary in 17097 seconds (at 2026-04-25 21:00 KST).
+2026-04-25 16:15:18 KST | INFO     | bot.monitor          | [polling/acct1] ✅ CAUGHT BY POLL | chat=-1001742386027 | msg=59340 | lag=3396s
+2026-04-25 16:15:21 KST | INFO     | bot.monitor          | [polling/acct1] ✅ CAUGHT BY POLL | chat=-1002858032342 | msg=10293 | lag=2679s
+2026-04-25 16:15:25 KST | INFO     | bot.monitor          | [polling/acct1] ✅ CAUGHT BY POLL | chat=-1001463257290 | msg=277234 | lag=2894s
+2026-04-25 16:15:25 KST | INFO     | bot.monitor          | [monitor/acct1] SOURCE GROUP HIT | chat_id=-1001304686518 | msg_id=129857 | delivery_lag=0.5s
+2026-04-25 16:15:25 KST | INFO     | bot.monitor          | [monitor/acct1] SKIPPED (no keywords) | chat_id=-1001304686518 | msg_id=129857 | preview="Assalomu aleykum \n\n27 April kuni insha'alloh uzbekistonga Toshkent ketamiz\n\nKasm"
+2026-04-25 16:15:28 KST | INFO     | bot.monitor          | [polling/acct1] ✅ CAUGHT BY POLL | chat=-1002567337700 | msg=31857 | lag=5929s
+2026-04-25 16:15:31 KST | INFO     | bot.monitor          | [polling/acct1] ✅ CAUGHT BY POLL | chat=-1001749857007 | msg=53019 | lag=7158s
+2026-04-25 16:15:35 KST | INFO     | bot.monitor          | [polling/acct1] ✅ CAUGHT BY POLL | chat=-1001799111985 | msg=185370 | lag=1367s
+2026-04-25 16:15:35 KST | INFO     | bot.monitor          | [polling/acct1] cycle done | checked=797 | caught=6
+2026-04-25 16:16:41 KST | INFO     | bot.database         | [DB] Cleared 58 forwarded_stats rows.
+2026-04-25 16:16:41 KST | INFO     | bot.admin_bot        | [admin_bot] Stats cleared by admin. 58 rows deleted.
+2026-04-25 16:17:01 KST | INFO     | bot.database         | [DB] Source group removed: -1001749857007
+2026-04-25 16:17:15 KST | INFO     | bot.database         | [DB] Source group removed: -1001463257290
+2026-04-25 16:17:41 KST | INFO     | bot.database         | [DB] Source group removed: -1003290368565
+2026-04-25 16:18:16 KST | INFO     | main                 | [main] Shutting down …
+2026-04-25 16:18:17 KST | INFO     | main                 | [main] Stopped.

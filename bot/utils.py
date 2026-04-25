@@ -28,15 +28,22 @@ from bot.config import LOG_LEVEL
 logger = logging.getLogger(__name__)
 
 
+def _kst_time(*args):
+    """logging.Formatter.converter — barcha log vaqtlarini KST da ko'rsatadi."""
+    return datetime.now(KST).timetuple()
+
+
 def setup_logging(name: str = "job_bot") -> logging.Logger:
     log = logging.getLogger()
     if log.handlers:
         return logging.getLogger(name)
     log.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
     fmt = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s",
+        fmt="%(asctime)s KST | %(levelname)-8s | %(name)-20s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    # Show all log timestamps in Korea Standard Time (UTC+9)
+    fmt.converter = _kst_time
     ch = logging.StreamHandler(sys.stdout)
     ch.setFormatter(fmt)
     log.addHandler(ch)
