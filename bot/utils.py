@@ -181,6 +181,7 @@ async def safe_send_message(
 
         # Step 4: send with retry
         attempt = 0
+        _send_start = time.monotonic()
         while attempt < MAX_RETRIES:
             attempt += 1
             try:
