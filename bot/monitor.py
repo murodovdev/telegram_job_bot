@@ -245,6 +245,7 @@ _pending_hashes: set = set()
 
 POLL_INTERVAL = 90   # seconds between polling cycles per account
 POLL_MESSAGES = 10   # how many recent messages to check per group per cycle
+POLL_MAX_AGE_HOURS = 2  # only forward messages younger than this
 
 # Groq API rate limit: max 3 parallel requests at once
 _groq_semaphore = asyncio.Semaphore(3)
@@ -301,9 +302,14 @@ async def _polling_loop(client, account_num: int) -> None:
                 msg_id = message.id
                 chat_id = group.chat_id
 
-                # Skip if already processed (event handler got it)
-                if db.is_processed(chat_id, msg_id):
-                    continue
+                # Skip old messages — only process recent ones
+                msg_time = message.date
+                if msg_time:
+                    if msg_time.tzinfo is None:
+                        msg_time = msg_time.replace(tzinfo=timezone.utc)
+                    age_hours = (utcnow() - msg_time).total_seconds() / 3600
+                    if age_hours > POLL_MAX_AGE_HOURS:
+                        continue  # too old — skip
 
                 # Extract text
                 text = (
