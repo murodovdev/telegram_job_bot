@@ -39,7 +39,7 @@ def setup_logging(name: str = "job_bot") -> logging.Logger:
         return logging.getLogger(name)
     log.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
     fmt = logging.Formatter(
-        fmt="%(asctime)s KST | %(levelname)-8s | %(name)-20s | %(message)s",
+        fmt="%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     # Show all log timestamps in Korea Standard Time (UTC+9)
