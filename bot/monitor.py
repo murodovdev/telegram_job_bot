@@ -243,9 +243,9 @@ _pending_hashes: set = set()
 # Together: even if event delivery fails entirely, every job post is
 # forwarded within POLL_INTERVAL seconds of being sent.
 
-POLL_INTERVAL = 90   # seconds between polling cycles per account
-POLL_MESSAGES = 10   # how many recent messages to check per group per cycle
-POLL_MAX_AGE_HOURS = 2  # only forward messages younger than this
+POLL_INTERVAL      = 15   # seconds between polling cycles per account
+POLL_MESSAGES      = 15   # how many recent messages to check per group per cycle
+POLL_MAX_AGE_HOURS =  2   # only forward messages younger than this
 
 # Groq API rate limit: max 3 parallel requests at once
 _groq_semaphore = asyncio.Semaphore(3)
@@ -253,26 +253,29 @@ _groq_semaphore = asyncio.Semaphore(3)
 
 async def _polling_loop(client, account_num: int) -> None:
     """
-    Backup polling loop — runs as an independent asyncio task.
+    Backup polling loop — barcha source guruhlarni PARALLEL tekshiradi.
 
-    Every POLL_INTERVAL seconds, fetches the last POLL_MESSAGES messages
-    from each source group assigned to this account. Any message that:
-      - passes the keyword filter
-      - has NOT been processed before (checked via DB)
-    is forwarded to the target group, exactly like the event handler would.
+    Har POLL_INTERVAL soniyada, barcha source guruhlar uchun
+    asyncio.gather() bilan bir vaqtda get_messages() chaqiriladi.
+    Bu 50 ta guruh uchun ketma-ket ~15s o'rniga ~1-2s oladi.
 
-    This guarantees that even if Telethon's event system misses a message
-    (due to MTProto push delay, reconnection gap, or queue backup), it will
-    be caught within POLL_INTERVAL seconds.
+    Har bir xabar uchun:
+      1. Yosh tekshiruvi (POLL_MAX_AGE_HOURS dan eski = o'tkazib yuboriladi)
+      2. is_processed tekshiruvi (event handler allaqachon ko'rgan = o'tkazib)
+      3. Keyword filter
+      4. Halal filter
+      5. Dedup
+      6. Forward
     """
     logger.info(
         "[polling/acct%s] Backup polling loop started "
-        "(interval=%ds, depth=%d msgs/group)",
+        "(interval=%ds, depth=%d msgs/group, parallel)",
         account_num, POLL_INTERVAL, POLL_MESSAGES,
     )
 
     while True:
         await asyncio.sleep(POLL_INTERVAL)
+
         groups = db.list_source_groups(account=account_num)
         if not groups:
             continue
@@ -281,37 +284,47 @@ async def _polling_loop(client, account_num: int) -> None:
         if not target:
             continue
 
-        checked = 0
-        forwarded = 0
-
-        for group in groups:
+        # ── Barcha guruhlardan PARALLEL get_messages() ────────────────────
+        # Avval: 50 guruh × ~300ms = ~15s ketma-ket
+        # Endi:  asyncio.gather() = ~300ms (parallel)
+        async def _fetch_group(group):
             try:
-                messages = await client.get_messages(
-                    group.chat_id,
-                    limit=POLL_MESSAGES,
-                )
+                msgs = await client.get_messages(group.chat_id, limit=POLL_MESSAGES)
+                return group, msgs
             except Exception as exc:
                 logger.debug(
                     "[polling/acct%s] get_messages failed for %s: %s",
                     account_num, group.title, exc,
                 )
-                continue
+                return group, []
 
+        results = await asyncio.gather(*[_fetch_group(g) for g in groups])
+
+        # ── Har bir xabarni qayta ishlash ──────────────────────────────
+        checked   = 0
+        forwarded = 0
+
+        for group, messages in results:
             for message in messages:
                 checked += 1
-                msg_id = message.id
+                msg_id  = message.id
                 chat_id = group.chat_id
 
-                # Skip old messages — only process recent ones
+                # 1. Yosh tekshiruvi — eski xabarlarni o'tkazib yuborish
                 msg_time = message.date
                 if msg_time:
                     if msg_time.tzinfo is None:
                         msg_time = msg_time.replace(tzinfo=timezone.utc)
                     age_hours = (utcnow() - msg_time).total_seconds() / 3600
                     if age_hours > POLL_MAX_AGE_HOURS:
-                        continue  # too old — skip
+                        continue
 
-                # Extract text
+                # 2. is_processed — event handler allaqachon ko'rganmi?
+                # Bu eng muhim check: ikki marta forward qilinishini oldini oladi
+                if db.is_processed(chat_id, msg_id):
+                    continue
+
+                # 3. Matn ajratish
                 text = (
                     getattr(message, "text", None)
                     or getattr(message, "caption", None)
@@ -321,18 +334,18 @@ async def _polling_loop(client, account_num: int) -> None:
                 if not text.strip():
                     continue
 
-                # Keyword filter
+                # 4. Keyword filter
                 result = is_job_message(text)
                 if not result.is_job:
                     continue
 
-                # Halal keyword filter
+                # 5. Halal keyword filter
                 haram_kw = is_haram_job(text)
                 if haram_kw.is_haram:
                     db.mark_processed(chat_id, msg_id)
                     continue
 
-                # Dedup
+                # 6. Kontent dedup
                 if DEDUP_WINDOW_HOURS > 0:
                     is_dup, _ = db.is_content_duplicate(
                         text,
@@ -343,8 +356,7 @@ async def _polling_loop(client, account_num: int) -> None:
                         db.mark_processed(chat_id, msg_id)
                         continue
 
-                # Build and send
-                msg_time = message.date
+                # 7. Post yasash va yuborish
                 if msg_time and msg_time.tzinfo is None:
                     msg_time = msg_time.replace(tzinfo=timezone.utc)
 
