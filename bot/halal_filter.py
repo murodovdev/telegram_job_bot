@@ -222,6 +222,11 @@ HARAM_CATEGORIES: dict[str, list[str]] = {
         "tekpe uchun",
         "tekpa",
         "текпе",
+        "CJGA",
+        "CJ"
+        "Dejon CJ"
+        "Hanjin",
+        "lotte tekpe"
     ],
 }
 
