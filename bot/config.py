@@ -67,7 +67,7 @@ TARGET_GROUP : str = os.getenv("TARGET_GROUP", "")
 # AND DATABASE_PATH is not explicitly overridden, we default to /data/job_bot.db
 # so that attaching a volume at /data is enough — no extra env var needed.
 _is_railway   = bool(os.getenv("RAILWAY_ENVIRONMENT"))
-_db_default   = "/data/job_bot.db" if _is_railway else "/data/job_bot.db"
+_db_default   = "/data/job_bot.db" if _is_railway else "data/job_bot.db"
 _db_raw       = os.getenv("DATABASE_PATH", _db_default)
 
 # Absolute paths (e.g. /data/job_bot.db) are used as-is.
