@@ -6,7 +6,6 @@
 [![Telethon](https://img.shields.io/badge/Telethon-1.36.0-blue)](https://docs.telethon.dev)
 [![aiogram](https://img.shields.io/badge/aiogram-3.13.0-blue)](https://aiogram.dev)
 [![Deployed on Railway](https://img.shields.io/badge/Deployed%20on-Railway-blueviolet?logo=railway)](https://railway.app)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ---
 
