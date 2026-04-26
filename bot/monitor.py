@@ -246,6 +246,16 @@ _pending_hashes: set = set()
 POLL_INTERVAL      = 15   # seconds between polling cycles per account
 POLL_MESSAGES      = 15   # how many recent messages to check per group per cycle
 POLL_MAX_AGE_HOURS =  2   # only forward messages younger than this
+POLL_STARTUP_DELAY = 90   # seconds to wait before FIRST poll after bot restart
+                          # This lets the event handler drain Telegram's pending
+                          # update queue and write is_processed records to DB,
+                          # so the first poll doesn't re-send already-forwarded posts.
+
+# In-memory guard: (chat_id, msg_id) pairs currently being processed
+# by either the event handler OR the polling loop.
+# Prevents the race condition where both channels pick up the same message
+# simultaneously (before either writes is_processed to DB) and both forward it.
+_processing_msgs: set = set()
 
 # Groq API rate limit: max 3 parallel requests at once
 _groq_semaphore = asyncio.Semaphore(3)
@@ -269,9 +279,15 @@ async def _polling_loop(client, account_num: int) -> None:
     """
     logger.info(
         "[polling/acct%s] Backup polling loop started "
-        "(interval=%ds, depth=%d msgs/group, parallel)",
-        account_num, POLL_INTERVAL, POLL_MESSAGES,
+        "(startup_delay=%ds, interval=%ds, depth=%d msgs/group, parallel)",
+        account_num, POLL_STARTUP_DELAY, POLL_INTERVAL, POLL_MESSAGES,
     )
+
+    # Wait on startup so the event handler can drain Telegram's pending
+    # update queue and mark messages as processed before first poll.
+    # Without this, the polling loop re-sends everything from the past
+    # POLL_MAX_AGE_HOURS on every bot restart.
+    await asyncio.sleep(POLL_STARTUP_DELAY)
 
     while True:
         await asyncio.sleep(POLL_INTERVAL)
@@ -323,6 +339,13 @@ async def _polling_loop(client, account_num: int) -> None:
                 # Bu eng muhim check: ikki marta forward qilinishini oldini oladi
                 if db.is_processed(chat_id, msg_id):
                     continue
+
+                # 2a. In-memory guard — event handler hozir bu xabarni
+                # qayta ishlayaptimi? (DB ga hali yozilmagan bo'lishi mumkin)
+                _key = (chat_id, msg_id)
+                if _key in _processing_msgs:
+                    continue
+                _processing_msgs.add(_key)
 
                 # 3. Matn ajratish
                 text = (
@@ -413,6 +436,7 @@ async def _polling_loop(client, account_num: int) -> None:
                         "chat=%s | msg=%s | lag=%.0fs",
                         account_num, chat_id, msg_id, _poll_lag,
                     )
+                _processing_msgs.discard(_key)
 
         if forwarded:
             logger.info(
@@ -553,6 +577,16 @@ def _make_message_handler(assigned_client, account_num: int):
                 account_num, chat_id, msg_id,
             )
             return
+
+        # In-memory guard — polling loop hozir bu xabarni qayta ishlayaptimi?
+        _pm_key = (chat_id, msg_id)
+        if _pm_key in _processing_msgs:
+            logger.debug(
+                "[monitor/acct%s] SKIPPED (in-flight by polling) | chat_id=%s | msg_id=%s",
+                account_num, chat_id, msg_id,
+            )
+            return
+        _processing_msgs.add(_pm_key)
 
         # ── 5. Keyword filter ─────────────────────────────────────
         result = is_job_message(text)
@@ -801,6 +835,8 @@ def _make_message_handler(assigned_client, account_num: int):
             # On failure: release so a manual retry or the next occurrence can go through.
             if content_hash:
                 _pending_hashes.discard(content_hash)
+            # Release in-memory processing guard
+            _processing_msgs.discard(_pm_key)
 
     async def _on_new_message(event: events.NewMessage.Event) -> None:
         """Thin wrapper — spawns task, returns to Telethon immediately."""
