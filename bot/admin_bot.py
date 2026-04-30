@@ -1460,8 +1460,170 @@ async def handle_importgroups_data(message: Message, state: FSMContext):
     while i < len(lines):
         line = lines[i].strip()
         # [A1] yoki [A2] bilan boshlangan qator
-        # [A1] yoki [A2] bilan boshlangan qator
-        m = re.match(r'^\[A(\d)\]\s+(.+)$', line)
+        # Raqam prefiksi bilan yoki prefikssiz [A1] qatorni aniqlash
+        # Format 1: "1. [A1] Guruh nomi"  (listgroups chiqishi)
+        # Format 2: "[A1] Guruh nomi"     (prefikssiz)
+        m = re.match(r'^(?:\d+\.\s*)?\[A(\d)\]\s+(.+)))$', line)
+        if m:
+            listgroups_found = True
+            account = int(m.group(1))
+            title   = m.group(2).strip()
+            chat_id  = None
+            username = None
+            # Keyingi qatorlarda ID va Link ni qidirish
+            for j in range(i + 1, min(i + 5, len(lines))):
+                l2 = lines[j].strip()
+                id_m   = re.match(r'^ID:\s*(-?\d+)$', l2)
+                link_m = re.match(r'^Link:\s*(?:https://t\.me/([^\s]+)|—)?$', l2)
+                if id_m:
+                    chat_id = int(id_m.group(1))
+                elif link_m and link_m.group(1):
+                    username = link_m.group(1)
+            if chat_id:
+                parsed.append((chat_id, title, username, account))
+            i += 4
+            continue
+        i += 1
+
+    # ── Format 2: oddiy qator  -1001234567890 Guruh nomi username ──
+    if not listgroups_found:
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('#') or line.startswith('📋'):
+                continue
+            parts = line.split()
+            if not parts:
+                continue
+            # Birinchi token raqammi?
+            try:
+                chat_id = int(parts[0])
+            except ValueError:
+                continue
+            title    = ' '.join(parts[1:-1]) if len(parts) > 2 else (parts[1] if len(parts) > 1 else str(chat_id))
+            username = parts[-1] if len(parts) > 2 and not parts[-1].startswith('-') else None
+            parsed.append((chat_id, title, username, 1))
+
+    if not parsed:
+        await state.clear()
+        await message.answer(
+            "⚠️ Hech qanday guruh topilmadi.\n\n"
+            "/listgroups natijasini to'liq paste qiling.",
+            reply_markup=_main_keyboard(),
+        )
+        return
+
+    # ── Databasega saqlash ──────────────────────────────────────
+    for chat_id, title, username, account in parsed:
+        try:
+            db.add_source_group(
+                chat_id=chat_id,
+                title=title,
+                username=username,
+                assigned_account=account,
+            )
+            added += 1
+        except Exception as e:
+            err_str = str(e).lower()
+            if "unique" in err_str or "duplicate" in err_str or "already" in err_str:
+                skipped += 1
+            else:
+                errors += 1
+                logger.warning("[importgroups] %s: %s", chat_id, e)
+
+    # ── Natija ─────────────────────────────────────────────────
+    total = db.list_source_groups()
+    result = (
+        f"✅ <b>Import yakunlandi!</b>\n\n"
+        f"📥 Yuborildi:          <b>{len(parsed)}</b> ta\n"
+        f"✅ Yangi qo\'shildi:    <b>{added}</b> ta\n"
+        f"⏭️ Allaqachon bor:    <b>{skipped}</b> ta\n"
+    )
+    if errors:
+        result += f"⚠️ Xato:              <b>{errors}</b> ta\n"
+    result += f"\n📊 Jami database da: <b>{len(total)}</b> ta guruh"
+
+    if added > 0:
+        result += "\n\n⚠️ Botni qayta ishga tushiring (Railway Redeploy)."
+
+    logger.info(
+        "[admin_bot] importgroups: parsed=%d added=%d skipped=%d errors=%d",
+        len(parsed), added, skipped, errors,
+    )
+
+    await state.clear()
+    await message.answer(result, parse_mode="HTML", reply_markup=_main_keyboard())
+
+
+
+# ── /aifilter ────────────────────────────────────────────────────
+
+@router.message(Command("aifilter"))
+@router.message(F.text.in_({"🤖 AI Filter: ON ✅", "🤖 AI Filter: OFF ❌"}))
+async def cmd_toggle_ai_filter(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.clear()
+
+    new_state = db.toggle_ai_filter()
+
+    if new_state:
+        status_icon = "✅"
+        status_text = "YOQildi"
+        detail = (
+            "Groq AI filtri endi <b>YOQIQ</b>.\n\n"
+            "Har bir ish e'loni Groq orqali tekshiriladi.\n"
+            "Harom yoki noaniq natijalar admin review queue ga yuboriladi."
+        )
+    else:
+        status_icon = "❌"
+        status_text = "O'chirildi"
+        detail = (
+            "Groq AI filtri endi <b>O'CHIQ</b>.\n\n"
+            "Ish e'lonlari Groq tekshiruvisiz darhol yuboriladi.\n"
+            "Kalit so'z asosidagi halal filtri hali ham ishlaydi."
+        )
+
+    logger.info(
+        "[admin_bot] AI filter toggled to %s by admin %s",
+        "ON" if new_state else "OFF",
+        message.from_user.id,
+    )
+
+    await message.answer(
+        f"{status_icon} <b>AI Filter {status_text}</b>\n\n"
+        f"{detail}",
+        parse_mode="HTML",
+        reply_markup=_main_keyboard(),   # button label auto-updates
+    )
+
+
+# ── Main ──────────────────────────────────────────────────────────
+
+async def run_admin_bot() -> None:
+    pathlib.Path("logs").mkdir(exist_ok=True)
+    db.init_db()
+
+    bot = Bot(token=BOT_TOKEN)
+    notifier_set_bot(bot)
+
+    # Monitor.py ga bot instansini uzatamiz — review queue xabarlari yuborish uchun
+    from bot.monitor import set_aiogram_bot
+    set_aiogram_bot(bot)
+
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(router)
+
+    logger.info("[admin_bot] Starting admin bot …")
+    await dp.start_polling(bot, skip_updates=True)
+
+
+if __name__ == "__main__":
+    setup_logging("admin_bot")
+    try:
+        asyncio.run(run_admin_bot())
+    except KeyboardInterrupt:
+        logger.info("[admin_bot] Stopped.")
+        sys.exit(0), line)
         if m:
             listgroups_found = True
             account = int(m.group(1))
