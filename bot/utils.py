@@ -42,14 +42,24 @@ def setup_logging(name: str = "job_bot") -> logging.Logger:
         fmt="%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    # Show all log timestamps in Korea Standard Time (UTC+9)
     fmt.converter = _kst_time
+
+    # stdout handler — Railway loglarini shu orqali ko'radi
     ch = logging.StreamHandler(sys.stdout)
     ch.setFormatter(fmt)
     log.addHandler(ch)
-    fh = logging.FileHandler("logs/job_bot.log", encoding="utf-8")
-    fh.setFormatter(fmt)
-    log.addHandler(fh)
+
+    # File handler — faqat logs/ papkasi yaratilsa qo'shiladi
+    # Railway da papka yo'q bo'lsa xato bermaydi
+    try:
+        import pathlib
+        pathlib.Path("logs").mkdir(exist_ok=True)
+        fh = logging.FileHandler("logs/job_bot.log", encoding="utf-8")
+        fh.setFormatter(fmt)
+        log.addHandler(fh)
+    except Exception:
+        pass  # Railway da file log ishlamasa ham stdout ishlaydi
+
     for noisy in ("telethon", "aiogram", "aiohttp"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     return logging.getLogger(name)
