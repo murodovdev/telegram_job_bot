@@ -1395,6 +1395,166 @@ async def cb_clear_stats(callback: CallbackQuery):
 # restarts.  The monitor.py hot path reads an in-memory cache (O(1))
 # that is invalidated as soon as this command updates the DB.
 
+# ── /importgroups ────────────────────────────────────────────────
+#
+# Format (bot o'zining /listgroups chiqishidan nusxa olinadi):
+#
+#   [A1] Guruh nomi
+#   ID: -1001234567890
+#   Link: https://t.me/username
+#
+# Yoki oddiy format (har qatorda):
+#   -1001234567890 Guruh nomi username
+#
+# Ikki formatni ham avtomatik aniqlaydi.
+# Mavjud guruhlar o'tkazib yuboriladi (xato yo'q).
+
+class ImportGroupsState(StatesGroup):
+    waiting_for_data = State()
+
+
+@router.message(Command("importgroups"))
+async def cmd_importgroups(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.set_state(ImportGroupsState.waiting_for_data)
+    await message.answer(
+        "📥 <b>Guruhlar ro'yxatini yuboring</b>\n\n"
+        "Bot o'zining <code>/listgroups</code> chiqishini to'g'ridan-to'g'ri "
+        "shu yerga paste qiling.\n\n"
+        "Yoki har qatorda:\n"
+        "<code>-1001234567890 Guruh nomi username</code>\n\n"
+        "Mavjud guruhlar o'tkazib yuboriladi.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+
+@router.message(ImportGroupsState.waiting_for_data)
+async def handle_importgroups_data(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+
+    text = message.text or ""
+    if not text.strip():
+        await message.answer("Bo'sh xabar. Bekor qilindi.", reply_markup=_main_keyboard())
+        await state.clear()
+        return
+
+    import re
+
+    added   = 0
+    skipped = 0
+    errors  = 0
+    parsed  = []   # list of (chat_id, title, username, account)
+
+    lines = text.splitlines()
+
+    # ── Format 1: /listgroups chiqishi ──────────────────────────
+    # Har guruh uchun 3 qator:
+    #   [A1] Guruh nomi          ← title + account
+    #   ID: -1001234567890        ← chat_id
+    #   Link: https://t.me/xxx   ← username (ixtiyoriy)
+    i = 0
+    listgroups_found = False
+    while i < len(lines):
+        line = lines[i].strip()
+        # [A1] yoki [A2] bilan boshlangan qator
+        # [A1] yoki [A2] bilan boshlangan qator
+        m = re.match(r'^\[A(\d)\]\s+(.+)$', line)
+        if m:
+            listgroups_found = True
+            account = int(m.group(1))
+            title   = m.group(2).strip()
+            chat_id  = None
+            username = None
+            # Keyingi qatorlarda ID va Link ni qidirish
+            for j in range(i + 1, min(i + 5, len(lines))):
+                l2 = lines[j].strip()
+                id_m   = re.match(r'^ID:\s*(-?\d+)$', l2)
+                link_m = re.match(r'^Link:\s*(?:https://t\.me/([^\s]+)|—)?$', l2)
+                if id_m:
+                    chat_id = int(id_m.group(1))
+                elif link_m and link_m.group(1):
+                    username = link_m.group(1)
+            if chat_id:
+                parsed.append((chat_id, title, username, account))
+            i += 4
+            continue
+        i += 1
+
+    # ── Format 2: oddiy qator  -1001234567890 Guruh nomi username ──
+    if not listgroups_found:
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('#') or line.startswith('📋'):
+                continue
+            parts = line.split()
+            if not parts:
+                continue
+            # Birinchi token raqammi?
+            try:
+                chat_id = int(parts[0])
+            except ValueError:
+                continue
+            title    = ' '.join(parts[1:-1]) if len(parts) > 2 else (parts[1] if len(parts) > 1 else str(chat_id))
+            username = parts[-1] if len(parts) > 2 and not parts[-1].startswith('-') else None
+            parsed.append((chat_id, title, username, 1))
+
+    if not parsed:
+        await state.clear()
+        await message.answer(
+            "⚠️ Hech qanday guruh topilmadi.\n\n"
+            "/listgroups natijasini to'liq paste qiling.",
+            reply_markup=_main_keyboard(),
+        )
+        return
+
+    # ── Databasega saqlash ──────────────────────────────────────
+    for chat_id, title, username, account in parsed:
+        try:
+            db.add_source_group(
+                chat_id=chat_id,
+                title=title,
+                username=username,
+                assigned_account=account,
+            )
+            added += 1
+        except Exception as e:
+            err_str = str(e).lower()
+            if "unique" in err_str or "duplicate" in err_str or "already" in err_str:
+                skipped += 1
+            else:
+                errors += 1
+                logger.warning("[importgroups] %s: %s", chat_id, e)
+
+    # ── Natija ─────────────────────────────────────────────────
+    total = db.list_source_groups()
+    result = (
+        f"✅ <b>Import yakunlandi!</b>\n\n"
+        f"📥 Yuborildi:          <b>{len(parsed)}</b> ta\n"
+        f"✅ Yangi qo\'shildi:    <b>{added}</b> ta\n"
+        f"⏭️ Allaqachon bor:    <b>{skipped}</b> ta\n"
+    )
+    if errors:
+        result += f"⚠️ Xato:              <b>{errors}</b> ta\n"
+    result += f"\n📊 Jami database da: <b>{len(total)}</b> ta guruh"
+
+    if added > 0:
+        result += "\n\n⚠️ Botni qayta ishga tushiring (Railway Redeploy)."
+
+    logger.info(
+        "[admin_bot] importgroups: parsed=%d added=%d skipped=%d errors=%d",
+        len(parsed), added, skipped, errors,
+    )
+
+    await state.clear()
+    await message.answer(result, parse_mode="HTML", reply_markup=_main_keyboard())
+
+
+
+# ── /aifilter ────────────────────────────────────────────────────
+
 @router.message(Command("aifilter"))
 @router.message(F.text.in_({"🤖 AI Filter: ON ✅", "🤖 AI Filter: OFF ❌"}))
 async def cmd_toggle_ai_filter(message: Message, state: FSMContext):
