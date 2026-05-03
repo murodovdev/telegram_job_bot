@@ -14,6 +14,7 @@ Changes in v5
 """
 
 import asyncio
+import re
 import logging
 from datetime import timezone
 from typing import Optional
@@ -850,6 +851,97 @@ def _make_message_handler(assigned_client, account_num: int):
 # Haram yoki noaniq: (1) postni o'chiradi, (2) adminga review yuboradi.
 # Halol: hech narsa qilmaydi.
 
+# ── Group info sync loop ───────────────────────────────────────────────────────
+# Har 4 soatda source guruhlar ma'lumotlarini tekshiradi:
+#   - Guruh nomi (title) o'zgardimi?
+#   - Username o'zgardimi yoki guruh private bo'lib qoldimi?
+#   - Private guruh bo'lsa description dan invite link qidiradi
+# O'zgarish bo'lsa DB yangilanadi va adminga xabar ketadi.
+
+GROUP_SYNC_INTERVAL = 4 * 3600   # 4 soat (soniyada)
+_INVITE_LINK_RE = re.compile(r'https://t\.me/\+[A-Za-z0-9_-]+')
+
+
+async def _group_sync_loop(client, account_num: int) -> None:
+    """
+    Background task: har GROUP_SYNC_INTERVAL soniyada source guruhlar
+    ma'lumotlarini Telegram API dan oladi va DB ni yangilaydi.
+    """
+    # Botni ishga tushirishdan keyin 2 daqiqa kutamiz
+    await asyncio.sleep(120)
+    logger.info(
+        "[group_sync/acct%s] Group sync loop started (interval=%dh)",
+        account_num, GROUP_SYNC_INTERVAL // 3600,
+    )
+
+    while True:
+        groups = db.list_source_groups(account=account_num)
+
+        for group in groups:
+            try:
+                entity = await client.get_entity(group.chat_id)
+            except Exception as exc:
+                logger.debug(
+                    "[group_sync/acct%s] Cannot fetch chat_id=%s: %s",
+                    account_num, group.chat_id, exc,
+                )
+                continue
+
+            new_title    = getattr(entity, "title", None) or group.title
+            new_username = getattr(entity, "username", None)  # None = private
+
+            # Private guruh — description dan invite link qidirish
+            invite_link: Optional[str] = None
+            if not new_username:
+                about = getattr(entity, "about", None) or ""
+                m = _INVITE_LINK_RE.search(about)
+                if m:
+                    invite_link = m.group(0)
+
+            title_changed    = new_title    != group.title
+            username_changed = new_username != group.username
+
+            if not title_changed and not username_changed:
+                continue   # Hech narsa o'zgarmagan — o'tkazib yuborish
+
+            # DB yangilash
+            db.update_source_group_title(
+                chat_id=group.chat_id,
+                title=new_title,
+                username=new_username or invite_link,
+            )
+
+            # Admin uchun xabar yaratish
+            parts = [
+                f"🔄 <b>Source group updated</b> (Account {account_num})",
+                f"ID: <code>{group.chat_id}</code>",
+            ]
+            if title_changed:
+                parts.append(
+                    f"Nomi: <s>{group.title}</s> → <b>{new_title}</b>"
+                )
+            if username_changed:
+                old_link = f"@{group.username}" if group.username else "private"
+                if new_username:
+                    new_link = f"@{new_username}"
+                elif invite_link:
+                    new_link = f"private (invite: {invite_link})"
+                else:
+                    new_link = "private (invite link topilmadi)"
+                parts.append(f"Link: {old_link} → {new_link}")
+
+            await notify_admin("\n".join(parts))
+            logger.info(
+                "[group_sync/acct%s] Updated chat_id=%s | title=%r | username=%r",
+                account_num, group.chat_id, new_title, new_username,
+            )
+
+            # Har guruh orasida biroz kutish (API rate limit uchun)
+            await asyncio.sleep(1)
+
+        await asyncio.sleep(GROUP_SYNC_INTERVAL)
+
+
 async def _background_groq_check(
     client,
     target: int,
@@ -1190,6 +1282,10 @@ async def setup_monitor() -> None:
         asyncio.create_task(
             _polling_loop(client, account_num),
             name=f"polling_acct{account_num}",
+        )
+        asyncio.create_task(
+            _group_sync_loop(client, account_num),
+            name=f"group_sync_acct{account_num}",
         )
         logger.info(
             "[monitor] Account %s: backup polling started (every %ds)",

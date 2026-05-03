@@ -13,6 +13,7 @@ Result: 1 post=instant, 5 posts=0s,3s,6s,9s,12s. Never 600s.
 import asyncio
 import html
 import logging
+import re
 import sys
 import time
 from datetime import datetime, timezone, timedelta
@@ -65,6 +66,27 @@ def setup_logging(name: str = "job_bot") -> logging.Logger:
     return logging.getLogger(name)
 
 
+def _strip_markdown(text: str) -> str:
+    """
+    Telegram Markdown belgilarini oddiy matnga aylantiradi.
+    **bold** → bold,  __italic__ → italic,  `code` → code
+    Bu belgilar html.escape() dan o'tkazilganda ham **text** ko'rinishida
+    target guruhga chiqib qolishini oldini oladi.
+    """
+    # ```code block```
+    text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+    # **bold** yoki __bold__
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text, flags=re.DOTALL)
+    text = re.sub(r'__(.+?)__',     r'\1', text, flags=re.DOTALL)
+    # *italic* (faqat yakka yulduzcha, juft emas)
+    text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'\1', text)
+    # `inline code`
+    text = re.sub(r'`(.+?)`', r'\1', text)
+    # ||spoiler||
+    text = re.sub(r'\|\|(.+?)\|\|', r'\1', text, flags=re.DOTALL)
+    return text
+
+
 def build_job_post(
     *,
     group_title: str,
@@ -81,7 +103,7 @@ def build_job_post(
     time_str = kst_time.strftime("%Y-%m-%d %H:%M:%S")
     safe_group_title  = html.escape(group_title)
     safe_author_name  = html.escape(author_name)
-    safe_message_text = html.escape(message_text)
+    safe_message_text = html.escape(_strip_markdown(message_text))
     group_part = (
         f'<a href="{html.escape(group_link)}">{safe_group_title}</a>'
         if group_link else safe_group_title
