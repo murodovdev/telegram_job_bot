@@ -1,4 +1,3 @@
 .env
 sessions/
 *.session
-PROJECT_CONTEXT.md
