@@ -1132,6 +1132,10 @@ def _make_filled_handlers(assigned_client, account_num: int):
       2. on_edited — ish e'loni tahrirlansa va "odam olindi" qo'shilsa
     """
     async def _on_reply(event: events.NewMessage.Event) -> None:
+        """Thin wrapper — spawns task immediately, Odam Olindi tezkor ishlaydi."""
+        asyncio.create_task(_process_reply(event))
+
+    async def _process_reply(event: events.NewMessage.Event) -> None:
         """Kimdir source guruhda ish e'loniga reply qildi."""
         message = event.message
         chat_id = event.chat_id
@@ -1159,6 +1163,10 @@ def _make_filled_handlers(assigned_client, account_num: int):
         )
 
     async def _on_edited(event: events.MessageEdited.Event) -> None:
+        """Thin wrapper — spawns task immediately, Odam Olindi tezkor ishlaydi."""
+        asyncio.create_task(_process_edited(event))
+
+    async def _process_edited(event: events.MessageEdited.Event) -> None:
         """Ish beruvchi o'z xabarini edit qildi."""
         message = event.message
         chat_id = event.chat_id
@@ -1181,6 +1189,10 @@ def _make_filled_handlers(assigned_client, account_num: int):
         )
 
     async def _on_no_reply(event: events.NewMessage.Event) -> None:
+        """Thin wrapper — spawns task immediately, Odam Olindi tezkor ishlaydi."""
+        asyncio.create_task(_process_no_reply(event))
+
+    async def _process_no_reply(event: events.NewMessage.Event) -> None:
         """
         Reply bo'lmagan holat: ish beruvchining o'zi guruhda shunchaki
         'odam olindi' deb yozadi. Sender ID orqali uning guruhda
