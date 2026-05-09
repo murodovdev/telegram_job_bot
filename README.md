@@ -1,6 +1,6 @@
 # 🇺🇿🇰🇷 Korea Ish E'lonlari — Telegram Job Aggregator Bot
 
-> A production-grade Telegram userbot that monitors 50+ Uzbek community groups in South Korea in real time, filters job announcements using multi-language keyword detection and AI-powered halal screening, and instantly forwards them to a single target group — serving **2,300+ active users**.
+> A production-grade Telegram userbot that monitors 50+ Uzbek community groups in South Korea in real time, filters job announcements using multi-language keyword detection and AI-powered halal screening, and instantly forwards them to a single target group — serving **3,000+ active users**.
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python)](https://python.org)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36.0-blue)](https://docs.telethon.dev)
