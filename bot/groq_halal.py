@@ -37,8 +37,7 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL   = "llama-3.3-70b-versatile"
 GROQ_TIMEOUT = 10   # sekund — agar API javob bermasa, o'tkazib yuboramiz
 
-# Fix 4: Persistent aiohttp session — har so'rovda yangi TCP konneksiya ochilmaydi.
-# Modul darajasida bitta session, butun bot ishlash davomida reuse qilinadi.
+# Module-level singleton session — reused for the bot's entire lifetime.
 _session: Optional[aiohttp.ClientSession] = None
 
 
@@ -175,7 +174,7 @@ async def check_halal_with_groq(text: str) -> GroqHalalResult:
         logger.warning("[groq_halal] GROQ_API_KEY not set — skipping AI check")
         return GroqHalalResult(verdict="halol", reason="api key not configured")
 
-    # Matnni 800 ta belgiga qisqartirish — token tejash uchun
+    # Truncate to 800 chars to keep token usage reasonable
     truncated = text[:800]
 
     payload = {

@@ -947,9 +947,8 @@ def clear_all_stats() -> int:
 
 # ── Halal review queue ────────────────────────────────────────────
 
-# ── Forwarded messages index ─────────────────────────────────────
-# "Odam olindi" feature uchun: manba guruhdagi xabar → target guruhdagi
-# forward qilingan xabar mapping.
+# Forwarded messages index
+# Maps (source_chat, source_msg) → target_msg_id for the "position filled" feature.
 
 def save_forwarded_msg(
     source_chat: int,

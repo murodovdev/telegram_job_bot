@@ -45,13 +45,13 @@ def setup_logging(name: str = "job_bot") -> logging.Logger:
     )
     fmt.converter = _kst_time
 
-    # stdout handler — Railway loglarini shu orqali ko'radi
+    # stdout handler — Railway streams logs from here
     ch = logging.StreamHandler(sys.stdout)
     ch.setFormatter(fmt)
     log.addHandler(ch)
 
-    # File handler — faqat logs/ papkasi yaratilsa qo'shiladi
-    # Railway da papka yo'q bo'lsa xato bermaydi
+    # File handler — only added when the logs/ directory is available.
+    # Silently skipped on Railway if the directory doesn't exist.
     try:
         import pathlib
         pathlib.Path("logs").mkdir(exist_ok=True)

@@ -51,9 +51,9 @@ from bot.utils import (
 
 logger = logging.getLogger(__name__)
 
-# ── "Odam olindi" kalit so'zlar ──────────────────────────────────
-# Manba guruhda ish e'loniga reply yoki edit orqali kelganda
-# target guruhda post "ODAM OLINDI" deb edit qilinadi.
+# "Position filled" keywords.
+# When a reply or edit containing one of these appears in a source group,
+# the corresponding forwarded post is edited to show "POSITION FILLED".
 _FILLED_KEYWORDS: list = [
     # O'zbekcha
     "odam olindi", "olindi", "olind", "band bo'ldi", "band boldi", "to'ldi", "toldi",
@@ -77,7 +77,7 @@ def _is_filled_signal(text: str) -> bool:
 
 # ── Review queue sender ───────────────────────────────────────────
 # Harom deb topilgan ish e'lonini admin botga yuboradi.
-# Yuborish uchun aiogram Bot instance lazim — admin_bot.py dan olinadi.
+# aiogram Bot instance for sending review queue notifications — injected by admin_bot.py.
 _aiogram_bot = None
 
 def set_aiogram_bot(bot) -> None:
@@ -163,7 +163,7 @@ async def _send_to_review(
         f"<b>Xabar matni:</b>\n{_html.escape(preview)}"
     )
 
-    # Fix 8: callback_data Telegram 64 bayt limitini tekshirish
+    # Telegram enforces a 64-byte limit on callback_data.
     approve_cb = f"review:approve:{review_id}"
     reject_cb  = f"review:reject:{review_id}"
     assert len(approve_cb.encode()) <= 64, f"callback_data too long: {approve_cb}"
@@ -301,9 +301,8 @@ async def _polling_loop(client, account_num: int) -> None:
         if not target:
             continue
 
-        # ── Barcha guruhlardan PARALLEL get_messages() ────────────────────
-        # Avval: 50 guruh × ~300ms = ~15s ketma-ket
-        # Endi:  asyncio.gather() = ~300ms (parallel)
+        # Fetch from all source groups in PARALLEL.
+        # Sequential: 50 groups × ~300ms = ~15s | Parallel: ~300ms
         async def _fetch_group(group):
             try:
                 msgs = await client.get_messages(group.chat_id, limit=POLL_MESSAGES)
@@ -317,7 +316,7 @@ async def _polling_loop(client, account_num: int) -> None:
 
         results = await asyncio.gather(*[_fetch_group(g) for g in groups])
 
-        # ── Har bir xabarni qayta ishlash ──────────────────────────────
+        # Process each retrieved message
         checked   = 0
         forwarded = 0
 
@@ -327,7 +326,7 @@ async def _polling_loop(client, account_num: int) -> None:
                 msg_id  = message.id
                 chat_id = group.chat_id
 
-                # 1. Yosh tekshiruvi — eski xabarlarni o'tkazib yuborish
+                # 1. Age gate — skip messages older than POLL_MAX_AGE_HOURS
                 msg_time = message.date
                 if msg_time:
                     if msg_time.tzinfo is None:
@@ -336,19 +335,17 @@ async def _polling_loop(client, account_num: int) -> None:
                     if age_hours > POLL_MAX_AGE_HOURS:
                         continue
 
-                # 2. is_processed — event handler allaqachon ko'rganmi?
-                # Bu eng muhim check: ikki marta forward qilinishini oldini oladi
+                # 2. Already processed — event handler got here first
                 if db.is_processed(chat_id, msg_id):
                     continue
 
-                # 2a. In-memory guard — event handler hozir bu xabarni
-                # qayta ishlayaptimi? (DB ga hali yozilmagan bo'lishi mumkin)
+                # 2a. In-memory guard — event handler may be mid-flight (not yet committed to DB)
                 _key = (chat_id, msg_id)
                 if _key in _processing_msgs:
                     continue
                 _processing_msgs.add(_key)
 
-                # 3. Matn ajratish
+                # 3. Extract text (plain text or media caption)
                 text = (
                     getattr(message, "text", None)
                     or getattr(message, "caption", None)
@@ -363,13 +360,13 @@ async def _polling_loop(client, account_num: int) -> None:
                 if not result.is_job:
                     continue
 
-                # 5. Halal keyword filter
+                # 5. Keyword-based halal pre-filter (no API call)
                 haram_kw = is_haram_job(text)
                 if haram_kw.is_haram:
                     db.mark_processed(chat_id, msg_id)
                     continue
 
-                # 6. Kontent dedup
+                # 6. Content dedup
                 if DEDUP_WINDOW_HOURS > 0:
                     is_dup, _ = db.is_content_duplicate(
                         text,
@@ -380,7 +377,7 @@ async def _polling_loop(client, account_num: int) -> None:
                         db.mark_processed(chat_id, msg_id)
                         continue
 
-                # 7. Post yasash va yuborish
+                # 7. Build post and send
                 if msg_time and msg_time.tzinfo is None:
                     msg_time = msg_time.replace(tzinfo=timezone.utc)
 
@@ -598,9 +595,8 @@ def _make_message_handler(assigned_client, account_num: int):
             )
             return
 
-        # ── 5.1 Pre-resolve group metadata (O(1), no API call) ──────────
-        # Guruh nomi va vaqt DB dan bepul olinadi. Sender resolve va Groq
-        # tekshiruvi kerak bo'lgandagina va parallel amalga oshiriladi.
+        # Gate 5.1 — pre-fetch group metadata from the DB (no API call).
+        # Sender resolution and Groq are deferred until actually needed.
         _stored_group    = db.get_source_group_by_id(chat_id)
         _pre_group_title = _stored_group.title if _stored_group else "Unknown Group"
         _pre_group_link  = (
@@ -612,9 +608,8 @@ def _make_message_handler(assigned_client, account_num: int):
             _pre_msg_time = _pre_msg_time.replace(tzinfo=timezone.utc)
         _pre_msg_time_str = _pre_msg_time.isoformat() if _pre_msg_time else ""
 
-        # ── 5.2 Keyword-based halal pre-filter ───────────────────────────
-        # Bu gate API chaqiruvisiz ishlaydi — eng tez bloklash yo'li.
-        # Harom topilsa: sender resolve qilinadi (review uchun), keyin qaytiladi.
+        # Gate 5.2 — keyword halal pre-filter (no API call).
+        # Fastest rejection path. On a hit, resolve sender for review metadata.
         haram_kw = is_haram_job(text)
         if haram_kw.is_haram:
             _kw_sender = None
@@ -647,17 +642,17 @@ def _make_message_handler(assigned_client, account_num: int):
                 db.mark_processed(chat_id, msg_id)
             return
 
-        # ── 5.3 + 5.5  Sender resolve  &  content dedup — PARALLEL ─────────
+        # Gate 5.3 + 5.5 — sender resolution & content dedup in PARALLEL.
         #
-        # Ilgari: get_sender() (~200ms) va dedup (~50ms) ketma-ket = ~250ms.
-        # Endi:   asyncio.gather() bilan ikkalasi parallel = ~200ms (max).
+        # Before: get_sender() (~200ms) then dedup (~50ms) = ~250ms sequential.
+        # After:  asyncio.gather() runs both concurrently = ~200ms (max of the two).
         #
-        # Exact-hash check (Tier 1, O(1)) avval sinxron tekshiriladi —
-        # duplicate bo'lsa API chaqiruvlarga ketmasdan darhol qaytiladi.
+        # Tier-1 exact hash is checked synchronously first (O(1), no DB I/O).
+        # On a hit we bail immediately without making any API calls.
         content_hash: Optional[str] = None
         _pre_sender: Optional[object] = None
 
-        # Tier 1 exact-hash sinxron — O(1), DB I/O yo'q (in-memory)
+        # Tier-1 exact-hash check — synchronous O(1), no DB I/O
         if DEDUP_WINDOW_HOURS > 0:
             content_hash = db._content_hash(text)
             if content_hash in _pending_hashes:
@@ -669,7 +664,7 @@ def _make_message_handler(assigned_client, account_num: int):
                 return
             _pending_hashes.add(content_hash)
 
-        # get_sender() va fuzzy dedup birga parallel
+        # Run sender resolution and fuzzy dedup in parallel
         async def _do_get_sender():
             try:
                 return await event.get_sender()
@@ -709,15 +704,14 @@ def _make_message_handler(assigned_client, account_num: int):
             result.matched_lang, result.matched_keywords,
         )
 
-        # ── 6. Resolve entities ───────────────────────────────────
-        # Fix 2: _pre_sender allaqachon Gate 5.1 da olingan — qayta get_sender()
-        # chaqirmaslik kerak. Bu har halol xabar uchun 100-500ms tejaydi.
-        # group_title ham DB dan allaqachon olingan (_pre_group_title).
+        # Gate 6 — _pre_sender was already resolved at Gate 5.3.
+        # No second get_sender() call — saves 100–500ms per forwarded post.
+        # group_title was also pre-fetched from the DB at Gate 5.1.
         group_title = _pre_group_title
         group_link  = _pre_group_link or None
 
         if not group_title or group_title == "Unknown Group":
-            # DB da topilmasa — Telegram API dan olish (kam uchraydi)
+            # Not in DB — fall back to Telegram API (rare)
             try:
                 chat        = await event.get_chat()
                 group_title = get_chat_display_name(chat)
@@ -770,13 +764,12 @@ def _make_message_handler(assigned_client, account_num: int):
                 # a failed send never permanently blacklists content.
                 if DEDUP_WINDOW_HOURS > 0:
                     db.record_content_hash(text, source_chat=chat_id, source_msg=msg_id)
-                # "Odam olindi" feature: target_msg_id ni DB ga saqlaymiz.
-                # safe_send_message now returns the sent Message object directly,
-                # so we read sent_msg.id here — no extra get_messages() API call
-                # needed. The old approach (get_messages after send) was both slow
-                # (~300 ms per post) and racey: if another message landed in the
-                # target group between send and fetch, the wrong ID was stored,
-                # silently breaking the "ODAM OLINDI" edit feature.
+                # "Position filled" feature: store source→target message ID mapping.
+                # safe_send_message returns the Message object directly so we use
+                # sent_msg.id immediately — no extra get_messages() call needed.
+                # The old approach (get_messages after send) was slow (~300ms/post)
+                # and racey: a concurrent message could produce the wrong stored ID,
+                # silently breaking the fill-signal edit.
                 try:
                     db.save_forwarded_msg(
                         source_chat=chat_id,
@@ -799,9 +792,8 @@ def _make_message_handler(assigned_client, account_num: int):
                     matched_kw=", ".join(result.matched_keywords),
                     match_tier=result.match_tier,
                 )
-                # ── Groq background check ───────────────────────────────────────
-                # Post allaqachon guruhga yuborildi. Groq fon rejimida
-                # tekshiradi — haram bo'lsa postni o'chirib adminga xabar beradi.
+                # Groq runs in the background after the post is already live.
+                # If flagged haram/unclear: deletes the post and queues it for review.
                 if db.is_ai_filter_enabled() and bool(GROQ_API_KEY):
                     asyncio.create_task(
                         _background_groq_check(
@@ -846,19 +838,19 @@ def _make_message_handler(assigned_client, account_num: int):
     return _on_new_message
 
 
-# ── Background Groq halal check ───────────────────────────────────────────────
-# Post allaqachon target guruhga yuborilgan. Bu funksiya fon rejimida ishlaydi.
-# Haram yoki noaniq: (1) postni o'chiradi, (2) adminga review yuboradi.
-# Halol: hech narsa qilmaydi.
+# Background Groq halal check.
+# Called after the post has already been forwarded to the target group.
+# haram / unclear → deletes the post and queues it for admin review.
+# halol           → no action.
 
-# ── Group info sync loop ───────────────────────────────────────────────────────
-# Har 4 soatda source guruhlar ma'lumotlarini tekshiradi:
-#   - Guruh nomi (title) o'zgardimi?
-#   - Username o'zgardimi yoki guruh private bo'lib qoldimi?
-#   - Private guruh bo'lsa description dan invite link qidiradi
-# O'zgarish bo'lsa DB yangilanadi va adminga xabar ketadi.
+# Group info sync loop.
+# Every GROUP_SYNC_INTERVAL seconds, re-fetches metadata for all source groups:
+#   - Has the group title changed?
+#   - Has the username changed or did the group go private?
+#   - If private, search the group description for an invite link.
+# Any change is written to the DB and the admin is notified.
 
-GROUP_SYNC_INTERVAL = 4 * 3600   # 4 soat (soniyada)
+GROUP_SYNC_INTERVAL = 4 * 3600   # 4 hours in seconds
 _INVITE_LINK_RE = re.compile(r'https://t\.me/\+[A-Za-z0-9_-]+')
 
 
@@ -867,7 +859,7 @@ async def _group_sync_loop(client, account_num: int) -> None:
     Background task: har GROUP_SYNC_INTERVAL soniyada source guruhlar
     ma'lumotlarini Telegram API dan oladi va DB ni yangilaydi.
     """
-    # Botni ishga tushirishdan keyin 2 daqiqa kutamiz
+    # Wait 2 minutes after startup before the first sync cycle.
     await asyncio.sleep(120)
     logger.info(
         "[group_sync/acct%s] Group sync loop started (interval=%dh)",
@@ -890,7 +882,7 @@ async def _group_sync_loop(client, account_num: int) -> None:
             new_title    = getattr(entity, "title", None) or group.title
             new_username = getattr(entity, "username", None)  # None = private
 
-            # Private guruh — description dan invite link qidirish
+            # Private group — look for an invite link in the group description
             invite_link: Optional[str] = None
             if not new_username:
                 about = getattr(entity, "about", None) or ""
@@ -902,7 +894,7 @@ async def _group_sync_loop(client, account_num: int) -> None:
             username_changed = new_username != group.username
 
             if not title_changed and not username_changed:
-                continue   # Hech narsa o'zgarmagan — o'tkazib yuborish
+                continue   # Nothing changed — skip DB write and admin notify
 
             # DB yangilash
             db.update_source_group_title(
@@ -911,7 +903,7 @@ async def _group_sync_loop(client, account_num: int) -> None:
                 username=new_username or invite_link,
             )
 
-            # Admin uchun xabar yaratish
+            # Build the admin notification message
             parts = [
                 f"🔄 <b>Source group updated</b> (Account {account_num})",
                 f"ID: <code>{group.chat_id}</code>",
@@ -936,7 +928,7 @@ async def _group_sync_loop(client, account_num: int) -> None:
                 account_num, group.chat_id, new_title, new_username,
             )
 
-            # Har guruh orasida biroz kutish (API rate limit uchun)
+            # Brief pause between groups to stay within Telegram's rate limits
             await asyncio.sleep(1)
 
         await asyncio.sleep(GROUP_SYNC_INTERVAL)
@@ -983,7 +975,7 @@ async def _background_groq_check(
             source_chat, source_msg, target_msg_id,
         )
 
-        # Target guruhdan o'chirish
+        # Delete the already-forwarded post from the target group
         try:
             await client.delete_messages(target, [target_msg_id])
             logger.info(
@@ -996,7 +988,7 @@ async def _background_groq_check(
                 account_num, target_msg_id, del_exc,
             )
 
-        # Adminga review queue
+        # Queue the flagged post for admin review
         await _send_to_review(
             text=text,
             source_chat=source_chat,
@@ -1061,14 +1053,14 @@ async def _on_chat_action(event: events.ChatAction.Event) -> None:
         )
 
 
-# ── Handler 3: "Odam olindi" — reply yoki edit orqali ────────────
+# "Position filled" handlers.
 #
-# Ikkita holat kuzatiladi:
-#   A) Manba guruhda ish e'loniga kimdir reply qilib "odam olindi" desa
-#   B) Ish beruvchi o'z xabarini edit qilib matniga "odam olindi" qo'shsa
+# Two cases:
+#   A) Someone replies to a job post with a fill signal.
+#   B) The original poster edits their message to include a fill signal.
 #
-# Ikkalasida ham target guruhda yuborilgan forward postga
-# "🔴 ODAM OLINDI" qo'shimcha qo'yiladi (edit orqali).
+# In both cases the corresponding forwarded post in the target group
+# is edited to append a "🔴 ODAM OLINDI" notice.
 
 async def _mark_filled_in_target(
     assigned_client,
@@ -1091,7 +1083,7 @@ async def _mark_filled_in_target(
     target_msg_id = record["target_msg_id"]
     old_text      = record["post_text"] or ""
 
-    # Eski matnning oxiriga "ODAM OLINDI" separator qo'shamiz
+    # Append the fill notice to the original post text
     separator = "\n\n─────────────────\n🔴 <b>ODAM OLINDI</b>"
     if "ODAM OLINDI" in old_text:
         logger.debug("[monitor] Already marked filled: target_msg_id=%s", target_msg_id)
@@ -1140,11 +1132,11 @@ def _make_filled_handlers(assigned_client, account_num: int):
         message = event.message
         chat_id = event.chat_id
 
-        # Faqat kuzatilayotgan manba guruhlardan
+        # Only process messages from monitored source groups
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
             return
 
-        # Faqat reply bo'lsa
+        # Only process actual replies
         if not message.reply_to_msg_id:
             return
 
@@ -1201,11 +1193,11 @@ def _make_filled_handlers(assigned_client, account_num: int):
         message = event.message
         chat_id = event.chat_id
 
-        # Faqat kuzatilayotgan manba guruhlardan
+        # Only process messages from monitored source groups
         if chat_id not in db.get_source_group_ids_cached(account=account_num):
             return
 
-        # Reply bo'lmagan holat — reply bo'lsa _on_reply handler oladi
+        # If it's a reply, _on_reply handles it
         if message.reply_to_msg_id:
             return
 
@@ -1217,7 +1209,7 @@ def _make_filled_handlers(assigned_client, account_num: int):
         if not sender_id:
             return
 
-        # O'sha sender_id dan shu guruhda eng oxirgi forward qilingan post
+        # Find the most recent post forwarded from this sender in this group
         record = db.get_last_forwarded_by_sender(
             source_chat=chat_id,
             sender_id=sender_id,
@@ -1246,8 +1238,9 @@ def _make_filled_handlers(assigned_client, account_num: int):
 
 async def setup_monitor() -> None:
     """Start all clients and register event handlers."""
-    # Fix 7: Startupda _pending_hashes tozalanadi — avvalgi crash dan qolgan
-    # yozuvlar yangi sessiyada xabarlarni noto'g'ri bloklashini oldini oladi.
+    # Clear stale in-flight hashes from any previous crash.
+    # Without this a crashed session could permanently block content
+    # that was never actually forwarded.
     _pending_hashes.clear()
     phone_numbers = {1: PHONE_NUMBER, 2: PHONE_NUMBER_2 or PHONE_NUMBER}
 

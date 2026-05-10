@@ -1397,17 +1397,17 @@ async def cb_clear_stats(callback: CallbackQuery):
 
 # ── /importgroups ────────────────────────────────────────────────
 #
-# Format (bot o'zining /listgroups chiqishidan nusxa olinadi):
+# Accepted input formats (auto-detected):
 #
-#   [A1] Guruh nomi
+#   Format 1 — /listgroups output (paste directly):
+#   [A1] Group name
 #   ID: -1001234567890
 #   Link: https://t.me/username
 #
-# Yoki oddiy format (har qatorda):
-#   -1001234567890 Guruh nomi username
+#   Format 2 — one group per line:
+#   -1001234567890 Group name username
 #
-# Ikki formatni ham avtomatik aniqlaydi.
-# Mavjud guruhlar o'tkazib yuboriladi (xato yo'q).
+# Existing groups are silently skipped (no error).
 
 class ImportGroupsState(StatesGroup):
     waiting_for_data = State()
@@ -1450,19 +1450,17 @@ async def handle_importgroups_data(message: Message, state: FSMContext):
 
     lines = text.splitlines()
 
-    # ── Format 1: /listgroups chiqishi ──────────────────────────
-    # Har guruh uchun 3 qator:
-    #   [A1] Guruh nomi          ← title + account
-    #   ID: -1001234567890        ← chat_id
-    #   Link: https://t.me/xxx   ← username (ixtiyoriy)
+    # Format 1: /listgroups output — 3 lines per group:
+    #   [A1] Group name          ← title + account
+    #   ID: -1001234567890       ← chat_id
+    #   Link: https://t.me/xxx  ← username (optional)
     i = 0
     listgroups_found = False
     while i < len(lines):
         line = lines[i].strip()
-        # [A1] yoki [A2] bilan boshlangan qator
-        # Raqam prefiksi bilan yoki prefikssiz [A1] qatorni aniqlash
-        # Format 1: "1. [A1] Guruh nomi"  (listgroups chiqishi)
-        # Format 2: "[A1] Guruh nomi"     (prefikssiz)
+        # Match lines starting with [A1] or [A2], with or without a numeric prefix:
+        #   "1. [A1] Group name"  (from /listgroups output)
+        #   "[A1] Group name"     (plain)
         m = re.match(r'^(?:\d+\.\s*)?\[A(\d)\]\s+(.+)$', line)
         if m:
             listgroups_found = True
@@ -1470,7 +1468,7 @@ async def handle_importgroups_data(message: Message, state: FSMContext):
             title   = m.group(2).strip()
             chat_id  = None
             username = None
-            # Keyingi qatorlarda ID va Link ni qidirish
+            # Scan ahead for the ID: and Link: fields
             for j in range(i + 1, min(i + 5, len(lines))):
                 l2 = lines[j].strip()
                 id_m   = re.match(r'^ID:\s*(-?\d+)$', l2)
@@ -1485,7 +1483,7 @@ async def handle_importgroups_data(message: Message, state: FSMContext):
             continue
         i += 1
 
-    # ── Format 2: oddiy qator  -1001234567890 Guruh nomi username ──
+    # Format 2: plain one-liner  -1001234567890 Group name username
     if not listgroups_found:
         for line in lines:
             line = line.strip()
@@ -1606,7 +1604,7 @@ async def run_admin_bot() -> None:
     bot = Bot(token=BOT_TOKEN)
     notifier_set_bot(bot)
 
-    # Monitor.py ga bot instansini uzatamiz — review queue xabarlari yuborish uchun
+    # Pass the bot instance to monitor.py so it can deliver review queue notifications
     from bot.monitor import set_aiogram_bot
     set_aiogram_bot(bot)
 

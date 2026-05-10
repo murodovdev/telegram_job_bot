@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 
 # ── Haram keyword registry ────────────────────────────────────────
 #
-# Har bir toifa alohida — shu tarzda log xabarida aniq ko'rinadi
-# qaysi toifa tufayli post bloklangani.
+# Each category is separate so the log message clearly identifies
+# which one caused the block.
 #
 # Qoidalar:
 #   • Barcha kalit so'zlar kichik harfda
@@ -148,7 +148,7 @@ HARAM_CATEGORIES: dict[str, list[str]] = {
     ],
 
     # 5. Foizga asoslangan moliya / sug'urta savdosi ──────────────
-    # Shartnomaning o'zi foizga qurilgan bo'lsa — riba hisoblanadi.
+    # Interest-based contracts are riba by definition.
     "riba": [
         # Koreys
         "보험영업",
@@ -241,7 +241,7 @@ def _build_haram_patterns() -> dict[str, re.Pattern]:
         parts = []
         for kw in keywords:
             escaped = re.escape(kw)
-            # Agar kalit so'zda koreys harfi bo'lsa — chegara qo'ymaymiz
+            # Korean/CJK keywords use substring match (no word boundaries)
             if re.search(r"[\u3131-\uD7A3]", kw):
                 parts.append(escaped)
             else:
