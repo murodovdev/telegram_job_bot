@@ -223,10 +223,22 @@ HARAM_CATEGORIES: dict[str, list[str]] = {
         "tekpa",
         "текпе",
         "CJGA",
-        "CJ"
-        "Dejon CJ"
+        "CJ",
+        "OKCHON CJ",
+        "Dejon CJ",
         "Hanjin",
-        "lotte tekpe"
+        "lotte tekpe",
+        "текпеда",
+        "текпега",
+        "Daejon Cj",
+        "Dejon Cj",
+        "cj",
+        "Cj",
+        "cJ",
+        "GONJIAM CJ"
+        "Gonjiam CJ",
+        "gonjiam cj",
+        "gonchiam cj",
     ],
 }
 

@@ -51,6 +51,7 @@ class SourceGroup:
     username: Optional[str]
     added_at: str
     assigned_account: int = 1
+    is_priority: int = 0  # 1 = admin gets an instant alert when a job is detected
 
 
 # ── Connection helper ────────────────────────────────────────────
@@ -216,6 +217,16 @@ def init_db() -> None:
                 "ALTER TABLE forwarded_msgs ADD COLUMN sender_id INTEGER"
             )
             logger.info("[DB] Migrated: added sender_id to forwarded_msgs")
+        except sqlite3.OperationalError:
+            pass
+
+        # Migrate source_groups — add is_priority if missing
+        try:
+            conn.execute(
+                "ALTER TABLE source_groups "
+                "ADD COLUMN is_priority INTEGER NOT NULL DEFAULT 0"
+            )
+            logger.info("[DB] Migrated: added is_priority to source_groups")
         except sqlite3.OperationalError:
             pass
 
