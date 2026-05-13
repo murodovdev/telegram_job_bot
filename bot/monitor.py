@@ -677,23 +677,31 @@ def _make_message_handler(assigned_client, account_num: int):
                 account_num, haram_kw.category,
                 haram_kw.matched_keywords, chat_id, msg_id,
             )
-            sent = await _send_to_review(
-                text=text,
-                source_chat=chat_id,
-                source_msg=msg_id,
-                haram_reason=f"Kalit so'z: {', '.join(haram_kw.matched_keywords)}",
-                haram_source="keyword",
-                group_title=_pre_group_title,
-                group_link=_pre_group_link,
-                author_name=get_sender_display_name(_kw_sender),
-                author_link=(
-                    get_user_link(_kw_sender)
-                    if isinstance(_kw_sender, User) else ""
-                ) or "",
-                msg_time=_pre_msg_time_str,
-            )
-            if sent:
+            if db.is_review_queue_enabled():
+                sent = await _send_to_review(
+                    text=text,
+                    source_chat=chat_id,
+                    source_msg=msg_id,
+                    haram_reason=f"Kalit so'z: {', '.join(haram_kw.matched_keywords)}",
+                    haram_source="keyword",
+                    group_title=_pre_group_title,
+                    group_link=_pre_group_link,
+                    author_name=get_sender_display_name(_kw_sender),
+                    author_link=(
+                        get_user_link(_kw_sender)
+                        if isinstance(_kw_sender, User) else ""
+                    ) or "",
+                    msg_time=_pre_msg_time_str,
+                )
+                if sent:
+                    db.mark_processed(chat_id, msg_id)
+            else:
                 db.mark_processed(chat_id, msg_id)
+                logger.info(
+                    "[monitor/acct%s] HARAM (keyword) dropped — review queue OFF | "
+                    "chat_id=%s | msg_id=%s",
+                    account_num, chat_id, msg_id,
+                )
             return
 
         # Gate 5.3 + 5.5 — sender resolution & content dedup in PARALLEL.
@@ -1053,6 +1061,13 @@ async def _background_groq_check(
                 "[monitor/acct%s] bg-Groq: delete failed target_msg=%s: %s",
                 account_num, target_msg_id, del_exc,
             )
+
+        if not db.is_review_queue_enabled():
+            logger.info(
+                "[monitor/acct%s] bg-Groq: %s dropped — review queue OFF | target_msg=%s",
+                account_num, groq_result.verdict, target_msg_id,
+            )
+            return
 
         # Queue the flagged post for admin review
         await _send_to_review(

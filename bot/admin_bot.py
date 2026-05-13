@@ -99,6 +99,11 @@ def _ai_filter_label() -> str:
     return "🤖 AI Filter: ON ✅" if db.is_ai_filter_enabled() else "🤖 AI Filter: OFF ❌"
 
 
+def _review_queue_label() -> str:
+    """Return the current review queue button label reflecting live state."""
+    return "📬 Review Queue: ON ✅" if db.is_review_queue_enabled() else "📭 Review Queue: OFF ❌"
+
+
 def _main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -109,6 +114,7 @@ def _main_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="🔎 Check Groups"), KeyboardButton(text="🚫 Blocked Users")],
             [KeyboardButton(text="🕌 Test Halal"),   KeyboardButton(text=_ai_filter_label())],
             [KeyboardButton(text="⭐ Watch Group"),   KeyboardButton(text="❌ Unwatch Group")],
+            [KeyboardButton(text=_review_queue_label())],
         ],
         resize_keyboard=True,
     )
@@ -1712,6 +1718,42 @@ async def cmd_toggle_ai_filter(message: Message, state: FSMContext):
 
 
 # ── Main ──────────────────────────────────────────────────────────
+
+@router.message(Command("reviewqueue"))
+@router.message(F.text.in_({"\U0001f4ec Review Queue: ON \u2705", "\U0001f4ed Review Queue: OFF \u274c"}))
+async def cmd_toggle_review_queue(message: Message, state: FSMContext):
+    """Toggle whether haram posts are sent to the admin review queue."""
+    if not await _is_admin(message):
+        return
+    await state.clear()
+    new_state = db.toggle_review_queue()
+    if new_state:
+        icon   = "\u2705"
+        detail = (
+            "Review queue endi <b>YOQIQ</b>.\n\n"
+            "Harom deb topilgan ish e'lonlar sizga "
+            "<b>Tasdiqlash / Rad etish</b> tugmalari bilan yuboriladi."
+        )
+    else:
+        icon   = "\u274c"
+        detail = (
+            "Review queue endi <b>O'CHIQ</b>.\n\n"
+            "Harom deb topilgan ish e'lonlar "
+            "<b>jimgina o'chirib tashlanadi</b> \u2014 "
+            "sizga hech qanday xabar yuborilmaydi."
+        )
+    logger.info(
+        "[admin_bot] Review queue toggled to %s by admin %s",
+        "ON" if new_state else "OFF",
+        message.from_user.id,
+    )
+    await message.answer(
+        f"{icon} <b>Review Queue "
+        f"{'Yoqildi' if new_state else \"O'chirildi\"}</b>\n\n{detail}",
+        parse_mode="HTML",
+        reply_markup=_main_keyboard(),
+    )
+
 
 async def run_admin_bot() -> None:
     pathlib.Path("logs").mkdir(exist_ok=True)

@@ -1200,7 +1200,40 @@ def toggle_ai_filter() -> bool:
     new_state = not current
     set_setting(_AI_FILTER_KEY, "1" if new_state else "0")
     logger.info(
-        "[DB] AI filter toggled: %s → %s",
+        "[DB] AI filter toggled: %s -> %s",
+        "ON" if current else "OFF",
+        "ON" if new_state else "OFF",
+    )
+    return new_state
+
+
+# Review queue toggle key: "review_queue_enabled"
+#   "1" = enabled (default) -- haram posts are sent to admin review queue
+#   "0" = disabled          -- haram posts are silently dropped
+
+_REVIEW_QUEUE_KEY = "review_queue_enabled"
+_review_queue_cache: Optional[bool] = None
+
+
+def is_review_queue_enabled() -> bool:
+    """Return True if haram posts should be sent to the admin review queue.
+    Defaults to True. Uses an in-memory cache identical to is_ai_filter_enabled()."""
+    global _review_queue_cache
+    if _review_queue_cache is None:
+        raw = get_setting(_REVIEW_QUEUE_KEY, default="1")
+        _review_queue_cache = raw != "0"
+    return _review_queue_cache
+
+
+def toggle_review_queue() -> bool:
+    """Flip the review queue state. Returns the NEW state (True = enabled)."""
+    global _review_queue_cache
+    current = is_review_queue_enabled()
+    new_state = not current
+    set_setting(_REVIEW_QUEUE_KEY, "1" if new_state else "0")
+    _review_queue_cache = new_state
+    logger.info(
+        "[DB] Review queue toggled: %s -> %s",
         "ON" if current else "OFF",
         "ON" if new_state else "OFF",
     )
