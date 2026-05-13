@@ -1747,9 +1747,9 @@ async def cmd_toggle_review_queue(message: Message, state: FSMContext):
         "ON" if new_state else "OFF",
         message.from_user.id,
     )
+    label = "Yoqildi" if new_state else "O'chirildi"
     await message.answer(
-        f"{icon} <b>Review Queue "
-        f"{'Yoqildi' if new_state else \"O'chirildi\"}</b>\n\n{detail}",
+        f"{icon} <b>Review Queue {label}</b>\n\n{detail}",
         parse_mode="HTML",
         reply_markup=_main_keyboard(),
     )
