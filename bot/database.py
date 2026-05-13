@@ -277,6 +277,7 @@ def init_db() -> None:
 # no I/O, no event-loop blocking.
 
 _source_group_ids_by_account: dict = {}  # {account_num: frozenset(chat_ids)}
+_priority_group_ids: frozenset = frozenset()  # priority group chat_ids
 _blocked_user_ids: frozenset = frozenset()
 _cached_target_id: Optional[int] = None
 # Separate flag so is_blocked_cached() does not re-query the DB on every
@@ -286,17 +287,21 @@ _blocked_cache_ready: bool = False
 
 
 def _cache_refresh_source_groups() -> None:
-    """Rebuild the source-group ID cache from the database."""
-    global _source_group_ids_by_account
+    """Rebuild the source-group ID cache (and priority set) from the database."""
+    global _source_group_ids_by_account, _priority_group_ids
     with _connection() as conn:
         rows = conn.execute(
-            "SELECT chat_id, assigned_account FROM source_groups"
+            "SELECT chat_id, assigned_account, is_priority FROM source_groups"
         ).fetchall()
     by_account: dict = {}
+    priority: set = set()
     for row in rows:
         acct = row["assigned_account"]
         by_account.setdefault(acct, set()).add(row["chat_id"])
+        if row["is_priority"]:
+            priority.add(row["chat_id"])
     _source_group_ids_by_account = {k: frozenset(v) for k, v in by_account.items()}
+    _priority_group_ids = frozenset(priority)
     logger.debug("[DB] source-group cache refreshed: %s",
                  {k: len(v) for k, v in _source_group_ids_by_account.items()})
 
@@ -329,12 +334,41 @@ def get_source_group_ids_cached(account: Optional[int] = None) -> frozenset:
     if not _source_group_ids_by_account:
         _cache_refresh_source_groups()
     if account is None:
-        # Union of all accounts
         result: set = set()
         for ids in _source_group_ids_by_account.values():
             result |= ids
         return frozenset(result)
     return _source_group_ids_by_account.get(account, frozenset())
+
+
+def get_priority_group_ids_cached() -> frozenset:
+    """O(1) hot-path read — returns priority group IDs from the in-memory cache."""
+    if not _source_group_ids_by_account:
+        _cache_refresh_source_groups()
+    return _priority_group_ids
+
+
+def set_group_priority(chat_id: int, is_priority: bool) -> bool:
+    """Mark or unmark a source group as priority. Returns True if a row was updated."""
+    with _connection() as conn:
+        cursor = conn.execute(
+            "UPDATE source_groups SET is_priority = ? WHERE chat_id = ?",
+            (1 if is_priority else 0, chat_id),
+        )
+        updated = cursor.rowcount > 0
+    if updated:
+        _cache_refresh_source_groups()
+        logger.info("[DB] Group %s priority → %s", chat_id, is_priority)
+    return updated
+
+
+def list_priority_groups() -> List[SourceGroup]:
+    """Return all priority source groups ordered by title."""
+    with _connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM source_groups WHERE is_priority = 1 ORDER BY title"
+        ).fetchall()
+    return [SourceGroup(**dict(row)) for row in rows]
 
 
 def is_blocked_cached(user_id: int) -> bool:

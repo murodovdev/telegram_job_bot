@@ -108,6 +108,7 @@ def _main_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📈 Stats"),        KeyboardButton(text="🔍 Test Keyword")],
             [KeyboardButton(text="🔎 Check Groups"), KeyboardButton(text="🚫 Blocked Users")],
             [KeyboardButton(text="🕌 Test Halal"),   KeyboardButton(text=_ai_filter_label())],
+            [KeyboardButton(text="⭐ Watch Group"),   KeyboardButton(text="❌ Unwatch Group")],
         ],
         resize_keyboard=True,
     )
@@ -325,8 +326,9 @@ async def cmd_list_groups(message: Message, state: FSMContext):
     for i, g in enumerate(groups, 1):
         link  = f"https://t.me/{g.username}" if g.username else "—"
         badge = " <b>[A2]</b>" if g.assigned_account == 2 else " [A1]"
+        star  = " ⭐" if g.is_priority else ""
         entries.append(
-            f"{i}.{badge} <b>{_html.escape(g.title)}</b>\n"
+            f"{i}.{badge}{star} <b>{_html.escape(g.title)}</b>\n"
             f"   ID: <code>{g.chat_id}</code>\n"
             f"   Link: {link}\n"
             f"   Added: {g.added_at}\n"
@@ -1378,6 +1380,120 @@ async def cb_clear_stats(callback: CallbackQuery):
     await callback.answer("✅ Statistika tozalandi!")
     logger.info("[admin_bot] Stats cleared by admin. %d rows deleted.", deleted)
 
+
+
+# ── /watchgroup & /unwatchgroup — priority group alerts ──────────
+
+@router.message(Command("watchgroup"))
+@router.message(F.text == "⭐ Watch Group")
+async def cmd_watchgroup(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.clear()
+    groups = [g for g in db.list_source_groups() if not g.is_priority]
+    if not groups:
+        await message.answer(
+            "ℹ️ Barcha guruhlar allaqachon priority sifatida belgilangan.",
+            reply_markup=_main_keyboard(),
+        )
+        return
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"⭐ {g.title}",
+            callback_data=f"watch:{g.chat_id}",
+        )]
+        for g in groups
+    ] + [[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="watch:cancel")]])
+    await message.answer(
+        "⭐ <b>Priority Guruh qo'shish</b>\n\n"
+        "Qaysi guruhdan xabar kelganda sizga darhol bildirishnoma yuborilsin?",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+
+@router.callback_query(F.data.startswith("watch:"))
+async def cb_watchgroup(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_USER_ID:
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    payload = callback.data[6:]
+    if payload == "cancel":
+        await callback.message.edit_text("Bekor qilindi.")
+        await callback.message.answer("Asosiy menyu.", reply_markup=_main_keyboard())
+        await callback.answer()
+        return
+    chat_id = int(payload)
+    groups  = db.list_source_groups()
+    title   = next((g.title for g in groups if g.chat_id == chat_id), str(chat_id))
+    updated = db.set_group_priority(chat_id, True)
+    if updated:
+        await callback.message.edit_text(
+            f"⭐ <b>{_html.escape(title)}</b> endi priority guruh.\n\n"
+            f"Bu guruhdan ish e'loni tushganda sizga darhol xabar yuboriladi.",
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.edit_text(
+            f"⚠️ Guruh topilmadi: <code>{chat_id}</code>.", parse_mode="HTML"
+        )
+    await callback.message.answer("Asosiy menyu.", reply_markup=_main_keyboard())
+    await callback.answer()
+
+
+@router.message(Command("unwatchgroup"))
+@router.message(F.text == "❌ Unwatch Group")
+async def cmd_unwatchgroup(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.clear()
+    groups = db.list_priority_groups()
+    if not groups:
+        await message.answer(
+            "ℹ️ Hech qanday priority guruh belgilanmagan.",
+            reply_markup=_main_keyboard(),
+        )
+        return
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"❌ {g.title}",
+            callback_data=f"unwatch:{g.chat_id}",
+        )]
+        for g in groups
+    ] + [[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="unwatch:cancel")]])
+    await message.answer(
+        "⭐ <b>Priority Guruhlar</b>\n\nQaysi guruhni ro'yxatdan chiqarish kerak?",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+
+@router.callback_query(F.data.startswith("unwatch:"))
+async def cb_unwatchgroup(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_USER_ID:
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    payload = callback.data[8:]
+    if payload == "cancel":
+        await callback.message.edit_text("Bekor qilindi.")
+        await callback.message.answer("Asosiy menyu.", reply_markup=_main_keyboard())
+        await callback.answer()
+        return
+    chat_id = int(payload)
+    groups  = db.list_priority_groups()
+    title   = next((g.title for g in groups if g.chat_id == chat_id), str(chat_id))
+    updated = db.set_group_priority(chat_id, False)
+    if updated:
+        await callback.message.edit_text(
+            f"✅ <b>{_html.escape(title)}</b> priority ro'yxatidan chiqarildi.",
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.edit_text(
+            f"⚠️ Guruh topilmadi: <code>{chat_id}</code>.", parse_mode="HTML"
+        )
+    await callback.message.answer("Asosiy menyu.", reply_markup=_main_keyboard())
+    await callback.answer()
 
 
 # ── /aifilter — toggle Groq AI halal filter ───────────────────────

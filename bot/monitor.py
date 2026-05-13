@@ -193,8 +193,51 @@ async def _send_to_review(
             logger.warning("[monitor] Failed to send review to admin: %s", exc)
             return False
     else:
-        logger.warning("[monitor] _aiogram_bot not set — review not sent to admin")
+        logger.warning("[monitor] _aiogram_bot not set — review not delivered to admin")
         return False
+
+
+async def _send_priority_alert(
+    group_title: str,
+    group_link: Optional[str],
+    author_name: str,
+    post_text: str,
+    account_num: int,
+) -> None:
+    """Send a priority-group job alert directly to the admin via the bot."""
+    if not _aiogram_bot:
+        return
+    import html as _html
+
+    group_part = (
+        f'<a href="{_html.escape(group_link)}">{_html.escape(group_title)}</a>'
+        if group_link else _html.escape(group_title)
+    )
+    preview = post_text[:800] + ("…" if len(post_text) > 800 else "")
+
+    text = (
+        f"⭐ <b>Priority Group — Yangi Ish E'loni</b>\n\n"
+        f"<b>Guruh:</b> {group_part}\n"
+        f"<b>Muallif:</b> {_html.escape(author_name)}\n\n"
+        f"{_html.escape(preview)}"
+    )
+
+    try:
+        await _aiogram_bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=text,
+            parse_mode="HTML",
+            link_preview=False,
+        )
+        logger.info(
+            "[monitor/acct%s] ⭐ Priority alert sent | group=%s",
+            account_num, group_title,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[monitor/acct%s] Priority alert failed: %s",
+            account_num, exc,
+        )
 
 # ── Race-condition guard for Gate 5.5 ────────────────────────────
 #
@@ -434,6 +477,17 @@ async def _polling_loop(client, account_num: int) -> None:
                         "chat=%s | msg=%s | lag=%.0fs",
                         account_num, chat_id, msg_id, _poll_lag,
                     )
+                    # Priority group alert for polling-caught messages
+                    if chat_id in db.get_priority_group_ids_cached():
+                        asyncio.create_task(
+                            _send_priority_alert(
+                                group_title=group.title,
+                                group_link=group_link,
+                                author_name=get_sender_display_name(sender),
+                                post_text=text,
+                                account_num=account_num,
+                            )
+                        )
                 _processing_msgs.discard(_key)
 
         if forwarded:
@@ -808,6 +862,18 @@ def _make_message_handler(assigned_client, account_num: int):
                             author_name=author_name,
                             author_link=author_link or "",
                             msg_time=_pre_msg_time_str,
+                            account_num=account_num,
+                        )
+                    )
+                # Priority group alert — notify admin immediately if this
+                # source group is marked as priority.
+                if chat_id in db.get_priority_group_ids_cached():
+                    asyncio.create_task(
+                        _send_priority_alert(
+                            group_title=group_title,
+                            group_link=group_link,
+                            author_name=author_name,
+                            post_text=text,
                             account_num=account_num,
                         )
                     )
