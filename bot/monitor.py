@@ -208,6 +208,7 @@ async def _send_priority_alert(
     if not _aiogram_bot:
         return
     import html as _html
+    from bot.config import ADMIN_USER_ID
 
     group_part = (
         f'<a href="{_html.escape(group_link)}">{_html.escape(group_title)}</a>'
