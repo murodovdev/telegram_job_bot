@@ -228,7 +228,7 @@ async def _send_priority_alert(
             chat_id=ADMIN_USER_ID,
             text=text,
             parse_mode="HTML",
-            link_preview=False,
+            disable_web_page_preview=True,
         )
         logger.info(
             "[monitor/acct%s] ⭐ Priority alert sent | group=%s",
