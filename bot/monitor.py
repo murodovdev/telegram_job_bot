@@ -234,11 +234,10 @@ async def _send_priority_alert(
             "[monitor/acct%s] ⭐ Priority alert sent | group=%s",
             account_num, group_title,
         )
-    except Exception as exc:
-        logger.warning(
-            "[monitor/acct%s] Priority alert failed: %s",
-            account_num, exc,
-        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("[monitor/acct%s] Priority alert failed", account_num)
 
 # ── Race-condition guard for Gate 5.5 ────────────────────────────
 #
@@ -301,6 +300,21 @@ POLL_STARTUP_DELAY = 90   # seconds to wait before FIRST poll after bot restart
 # Prevents the race condition where both channels pick up the same message
 # simultaneously (before either writes is_processed to DB) and both forward it.
 _processing_msgs: set = set()
+
+# Background task registry — holds strong references so the GC can never
+# destroy an in-flight task before it finishes.  See Python docs:
+# "If no reference is kept to the task it may be GC'd at any time, even
+# before it finishes."
+_background_tasks: set = set()
+
+
+def _fire(coro, **kwargs) -> "asyncio.Task":
+    """Schedule a coroutine as a Task and pin it so GC cannot destroy it."""
+    task = asyncio.create_task(coro, **kwargs)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
 
 # Groq API rate limit: max 3 parallel requests at once
 _groq_semaphore = asyncio.Semaphore(3)
@@ -480,7 +494,7 @@ async def _polling_loop(client, account_num: int) -> None:
                     )
                     # Priority group alert for polling-caught messages
                     if chat_id in db.get_priority_group_ids_cached():
-                        asyncio.create_task(
+                        _fire(
                             _send_priority_alert(
                                 group_title=group.title,
                                 group_link=group_link,
@@ -858,7 +872,7 @@ def _make_message_handler(assigned_client, account_num: int):
                 # Groq runs in the background after the post is already live.
                 # If flagged haram/unclear: deletes the post and queues it for review.
                 if db.is_ai_filter_enabled() and bool(GROQ_API_KEY):
-                    asyncio.create_task(
+                    _fire(
                         _background_groq_check(
                             client=assigned_client,
                             target=target,
@@ -877,7 +891,7 @@ def _make_message_handler(assigned_client, account_num: int):
                 # Priority group alert — notify admin immediately if this
                 # source group is marked as priority.
                 if chat_id in db.get_priority_group_ids_cached():
-                    asyncio.create_task(
+                    _fire(
                         _send_priority_alert(
                             group_title=group_title,
                             group_link=group_link,
@@ -908,7 +922,7 @@ def _make_message_handler(assigned_client, account_num: int):
 
     async def _on_new_message(event: events.NewMessage.Event) -> None:
         """Thin wrapper — spawns task, returns to Telethon immediately."""
-        asyncio.create_task(_process_message(event))
+        _fire(_process_message(event))
 
     return _on_new_message
 
@@ -1084,11 +1098,10 @@ async def _background_groq_check(
             msg_time=msg_time,
         )
 
-    except Exception as exc:
-        logger.error(
-            "[monitor/acct%s] bg-Groq check crashed: %s",
-            account_num, exc,
-        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("[monitor/acct%s] bg-Groq check crashed", account_num)
 
 
 # ── Handler 2: auto-delete join/leave service messages ────────────
@@ -1207,7 +1220,7 @@ def _make_filled_handlers(assigned_client, account_num: int):
     """
     async def _on_reply(event: events.NewMessage.Event) -> None:
         """Thin wrapper — spawns task immediately, Odam Olindi tezkor ishlaydi."""
-        asyncio.create_task(_process_reply(event))
+        _fire(_process_reply(event))
 
     async def _process_reply(event: events.NewMessage.Event) -> None:
         """Kimdir source guruhda ish e'loniga reply qildi."""
@@ -1238,7 +1251,7 @@ def _make_filled_handlers(assigned_client, account_num: int):
 
     async def _on_edited(event: events.MessageEdited.Event) -> None:
         """Thin wrapper — spawns task immediately, Odam Olindi tezkor ishlaydi."""
-        asyncio.create_task(_process_edited(event))
+        _fire(_process_edited(event))
 
     async def _process_edited(event: events.MessageEdited.Event) -> None:
         """Ish beruvchi o'z xabarini edit qildi."""
@@ -1264,7 +1277,7 @@ def _make_filled_handlers(assigned_client, account_num: int):
 
     async def _on_no_reply(event: events.NewMessage.Event) -> None:
         """Thin wrapper — spawns task immediately, Odam Olindi tezkor ishlaydi."""
-        asyncio.create_task(_process_no_reply(event))
+        _fire(_process_no_reply(event))
 
     async def _process_no_reply(event: events.NewMessage.Event) -> None:
         """
@@ -1366,11 +1379,11 @@ async def setup_monitor() -> None:
         )
 
         # Start backup polling loop — catches messages missed by event system
-        asyncio.create_task(
+        _fire(
             _polling_loop(client, account_num),
             name=f"polling_acct{account_num}",
         )
-        asyncio.create_task(
+        _fire(
             _group_sync_loop(client, account_num),
             name=f"group_sync_acct{account_num}",
         )

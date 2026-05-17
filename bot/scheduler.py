@@ -9,10 +9,12 @@ The summary is sent as a DM to ADMIN_USER_ID via the aiogram bot.
 
 import asyncio
 import logging
+import sqlite3
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 import bot.database as db
-from bot.config import DEDUP_WINDOW_HOURS
+from bot.config import DEDUP_WINDOW_HOURS, DATABASE_PATH
 from bot.notifier import notify_admin
 
 logger = logging.getLogger(__name__)
@@ -90,6 +92,17 @@ async def run_daily_summary_scheduler() -> None:
             db.cleanup_original_msg_index(keep_days=7)
             db.cleanup_review_queue(keep_hours=48)
             db.cleanup_forwarded_msgs(keep_hours=48)
+            # Nightly DB backup — copies live DB to job_bot_backup.db on the same volume
+            try:
+                backup_path = Path(str(DATABASE_PATH)).parent / "job_bot_backup.db"
+                src_conn = sqlite3.connect(str(DATABASE_PATH))
+                bak_conn = sqlite3.connect(str(backup_path))
+                src_conn.backup(bak_conn)
+                bak_conn.close()
+                src_conn.close()
+                logger.info("[scheduler] DB backup written to %s", backup_path)
+            except Exception as bak_exc:
+                logger.error("[scheduler] DB backup failed: %s", bak_exc)
         except Exception as exc:
             logger.error("[scheduler] Error sending daily summary: %s", exc)
 

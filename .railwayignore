@@ -1,0 +1,18 @@
+# Files excluded from Railway deployments
+
+# Session generation — only needed locally, never on the server
+generate_session.py
+fix_chat_ids.py
+
+# Local patch scripts
+patch_create_task.py
+
+# Local session files
+sessions/
+*.session
+*.session-journal
+
+# Local dev files
+logs/
+data/
+.env
