@@ -2,7 +2,8 @@
 # Docs: https://docs.railway.com/reference/config-as-code
 
 [build]
-builder = "NIXPACKS"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
 # Graceful shutdown: give the process time to flush DB and close connections
