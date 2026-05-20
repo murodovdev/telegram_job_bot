@@ -1826,14 +1826,25 @@ async def cmd_vip_group_test(message: Message, state: FSMContext):
     from bot.utils import build_job_post
     from datetime import datetime, timezone, timedelta
 
-    # Build a realistic test post using the exact same build_job_post() call
-    # that monitor.py uses for real posts.
     KST = timezone(timedelta(hours=9))
+
+    # Use the real admin's info so the author link is a working hyperlink
+    admin = message.from_user
+    author_name = (
+        f"{admin.first_name or ''} {admin.last_name or ''}".strip()
+        or "Test Admin"
+    )
+    author_link = (
+        f"https://t.me/{admin.username}"
+        if admin.username
+        else f"tg://user?id={admin.id}"
+    )
+
     test_post = build_job_post(
         group_title="Test Guruh 🧪",
         group_link="https://t.me/test",
-        author_name="Test Admin",
-        author_link=None,
+        author_name=author_name,
+        author_link=author_link,
         message_time=datetime.now(KST),
         message_text=(
             "Bu VIP guruh uchun test xabari.\n\n"
