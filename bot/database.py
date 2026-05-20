@@ -1174,7 +1174,7 @@ def get_setting(key: str, default: str = "") -> str:
 
 def set_setting(key: str, value: str) -> None:
     """Upsert a key-value pair into bot_settings."""
-    global _ai_filter_cache
+    global _ai_filter_cache, _review_queue_cache, _priority_group_target_cache, _priority_group_cache_loaded
     with _connection() as conn:
         conn.execute(
             """
@@ -1186,9 +1186,14 @@ def set_setting(key: str, value: str) -> None:
             """,
             (key, value),
         )
-    # Invalidate the AI-filter in-memory cache if this key changed it.
+    # Invalidate relevant in-memory caches when their keys change.
     if key == _AI_FILTER_KEY:
         _ai_filter_cache = None
+    if key == _REVIEW_QUEUE_KEY:
+        _review_queue_cache = None
+    if key == _PRIORITY_GROUP_KEY:
+        _priority_group_target_cache = None
+        _priority_group_cache_loaded = False
     logger.info("[DB] Setting updated: %s = %s", key, value)
 
 
@@ -1253,3 +1258,32 @@ def toggle_review_queue() -> bool:
         "ON" if new_state else "OFF",
     )
     return new_state
+
+
+# Priority group target key: "priority_group_id"
+# When set, priority job alerts are posted to this Telegram group
+# instead of the admin's private DM.
+
+_PRIORITY_GROUP_KEY = "priority_group_id"
+_priority_group_target_cache: Optional[int] = None
+_priority_group_cache_loaded: bool = False
+
+
+def get_priority_group_target() -> Optional[int]:
+    """Return the VIP group chat_id, or None if not configured."""
+    global _priority_group_target_cache, _priority_group_cache_loaded
+    if not _priority_group_cache_loaded:
+        raw = get_setting(_PRIORITY_GROUP_KEY, default="")
+        _priority_group_target_cache = int(raw) if raw.lstrip("-").isdigit() else None
+        _priority_group_cache_loaded = True
+    return _priority_group_target_cache
+
+
+def set_priority_group_target(chat_id: Optional[int]) -> None:
+    """Set or clear the VIP group. Pass None to remove."""
+    global _priority_group_target_cache, _priority_group_cache_loaded
+    value = str(chat_id) if chat_id is not None else ""
+    set_setting(_PRIORITY_GROUP_KEY, value)
+    _priority_group_target_cache = chat_id
+    _priority_group_cache_loaded = True
+    logger.info("[DB] Priority group target set to %s", chat_id)

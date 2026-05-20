@@ -198,13 +198,40 @@ async def _send_to_review(
 
 
 async def _send_priority_alert(
+    client,
     group_title: str,
     group_link: Optional[str],
     author_name: str,
-    post_text: str,
+    formatted_post: str,
     account_num: int,
 ) -> None:
-    """Send a priority-group job alert directly to the admin via the bot."""
+    """
+    Route a priority job post to the VIP group (if configured)
+    or fall back to the admin's DM.
+
+    VIP group  — sent via Telethon client + safe_send_message,
+                  identical to how target group messages are sent.
+    Admin DM   — fallback via aiogram bot when no VIP group is set.
+    """
+    priority_group = db.get_priority_group_target()
+
+    if priority_group:
+        # Use the same Telethon client + rate-limiter as the target group
+        # so the message looks and feels 100% identical.
+        sent = await safe_send_message(client, priority_group, formatted_post)
+        if sent:
+            logger.info(
+                "[monitor/acct%s] ⭐ Priority alert sent | group=%s | dest=VIP %s",
+                account_num, group_title, priority_group,
+            )
+        else:
+            logger.warning(
+                "[monitor/acct%s] ⭐ Priority alert FAILED | dest=VIP %s",
+                account_num, priority_group,
+            )
+        return
+
+    # No VIP group — fall back to admin DM via aiogram bot
     if not _aiogram_bot:
         return
     import html as _html
@@ -214,15 +241,12 @@ async def _send_priority_alert(
         f'<a href="{_html.escape(group_link)}">{_html.escape(group_title)}</a>'
         if group_link else _html.escape(group_title)
     )
-    preview = post_text[:800] + ("…" if len(post_text) > 800 else "")
-
     text = (
         f"⭐ <b>Priority Group — Yangi Ish E'loni</b>\n\n"
         f"<b>Guruh:</b> {group_part}\n"
         f"<b>Muallif:</b> {_html.escape(author_name)}\n\n"
-        f"{_html.escape(preview)}"
+        f"{formatted_post}"
     )
-
     try:
         await _aiogram_bot.send_message(
             chat_id=ADMIN_USER_ID,
@@ -231,7 +255,7 @@ async def _send_priority_alert(
             disable_web_page_preview=True,
         )
         logger.info(
-            "[monitor/acct%s] ⭐ Priority alert sent | group=%s",
+            "[monitor/acct%s] ⭐ Priority alert sent | group=%s | dest=admin DM",
             account_num, group_title,
         )
     except asyncio.CancelledError:
@@ -496,10 +520,11 @@ async def _polling_loop(client, account_num: int) -> None:
                     if chat_id in db.get_priority_group_ids_cached():
                         _fire(
                             _send_priority_alert(
+                                client=client,
                                 group_title=group.title,
                                 group_link=group_link,
                                 author_name=get_sender_display_name(sender),
-                                post_text=text,
+                                formatted_post=post_text,
                                 account_num=account_num,
                             )
                         )
@@ -888,15 +913,16 @@ def _make_message_handler(assigned_client, account_num: int):
                             account_num=account_num,
                         )
                     )
-                # Priority group alert — notify admin immediately if this
-                # source group is marked as priority.
+                # Priority group alert — send formatted post to VIP group
+                # (or admin DM as fallback) if source group is marked priority.
                 if chat_id in db.get_priority_group_ids_cached():
                     _fire(
                         _send_priority_alert(
+                            client=assigned_client,
                             group_title=group_title,
                             group_link=group_link,
                             author_name=author_name,
-                            post_text=text,
+                            formatted_post=post_text,
                             account_num=account_num,
                         )
                     )

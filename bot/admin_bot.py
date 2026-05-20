@@ -1011,6 +1011,14 @@ async def cmd_status(message: Message, state: FSMContext):
         if target else "❌ Not set — use 🎯 Set Target"
     )
     lines.append(f"🎯 Target: {target_str}")
+
+    vip_id = db.get_priority_group_target()
+    if vip_id:
+        pcount = len(db.list_priority_groups())
+        lines.append(f"⭐ VIP Group: <code>{vip_id}</code> ({pcount} priority source(s))")
+    else:
+        lines.append("⭐ VIP Group: ❌ Not set — use /setprioritygroup")
+
     lines.append(f"📨 Total forwarded: <b>{processed}</b>")
 
     await message.answer(
@@ -1726,6 +1734,145 @@ async def cmd_toggle_ai_filter(message: Message, state: FSMContext):
 
 
 # ── Main ──────────────────────────────────────────────────────────
+
+@router.message(Command("setprioritygroup"))
+async def cmd_set_priority_group(message: Message, state: FSMContext):
+    """
+    /setprioritygroup <chat_id>  — set VIP group
+    /setprioritygroup clear      — remove VIP group
+    /setprioritygroup            — show current setting
+    """
+    if not await _is_admin(message):
+        return
+    await state.clear()
+
+    args = (message.text or "").split(maxsplit=1)
+    arg  = args[1].strip() if len(args) > 1 else ""
+    current = db.get_priority_group_target()
+
+    if not arg:
+        if current:
+            await message.answer(
+                f"⭐ <b>VIP Group</b> hozirda: <code>{current}</code>\n\n"
+                f"O'chirish: <code>/setprioritygroup clear</code>\n"
+                f"O'zgartirish: <code>/setprioritygroup -1001234567890</code>",
+                parse_mode="HTML", reply_markup=_main_keyboard(),
+            )
+        else:
+            await message.answer(
+                "⭐ <b>VIP Group</b> hali o'rnatilmagan.\n\n"
+                "Chat ID ni kiriting:\n"
+                "<code>/setprioritygroup -1001234567890</code>",
+                parse_mode="HTML", reply_markup=_main_keyboard(),
+            )
+        return
+
+    if arg.lower() == "clear":
+        db.set_priority_group_target(None)
+        await message.answer(
+            "✅ VIP Group o'chirildi.\n"
+            "Priority ish e'lonlari endi admin DM ga yuboriladi.",
+            reply_markup=_main_keyboard(),
+        )
+        logger.info("[admin_bot] VIP group cleared by admin %s", message.from_user.id)
+        return
+
+    if not arg.lstrip("-").isdigit():
+        await message.answer(
+            "⚠️ Noto'g'ri format. Chat ID raqam bo'lishi kerak:\n"
+            "<code>/setprioritygroup -1001234567890</code>",
+            parse_mode="HTML", reply_markup=_main_keyboard(),
+        )
+        return
+
+    chat_id = int(arg)
+    db.set_priority_group_target(chat_id)
+    await message.answer(
+        f"✅ <b>VIP Group o'rnatildi:</b> <code>{chat_id}</code>\n\n"
+        f"Priority guruhlardan kelgan ish e'lonlar endi shu guruhga yuboriladi.\n"
+        f"Eslatma: botni o'sha guruhga <b>admin</b> qilib qo'shing.",
+        parse_mode="HTML", reply_markup=_main_keyboard(),
+    )
+    logger.info("[admin_bot] VIP group set to %s by admin %s", chat_id, message.from_user.id)
+
+
+# /vipgrouptest — send a test post to the VIP group ────────────────
+
+@router.message(Command("vipgrouptest"))
+async def cmd_vip_group_test(message: Message, state: FSMContext):
+    """Send a test post to the VIP group using the exact same format as live posts."""
+    if not await _is_admin(message):
+        return
+    await state.clear()
+
+    vip_id = db.get_priority_group_target()
+    if not vip_id:
+        await message.answer(
+            "⚠️ VIP Group o'rnatilmagan.\n"
+            "Avval <code>/setprioritygroup -1001234567890</code> bilan guruh o'rnating.",
+            parse_mode="HTML",
+            reply_markup=_main_keyboard(),
+        )
+        return
+
+    client = _get_client(1)
+    if client is None or not client.is_connected():
+        await message.answer(
+            "❌ Account 1 ulangan emas. Bot ishga tushganini tekshiring.",
+            reply_markup=_main_keyboard(),
+        )
+        return
+
+    from bot.utils import build_job_post
+    from datetime import datetime, timezone, timedelta
+
+    # Build a realistic test post using the exact same build_job_post() call
+    # that monitor.py uses for real posts.
+    KST = timezone(timedelta(hours=9))
+    test_post = build_job_post(
+        group_title="Test Guruh 🧪",
+        group_link="https://t.me/test",
+        author_name="Test Admin",
+        author_link=None,
+        message_time=datetime.now(KST),
+        message_text=(
+            "Bu VIP guruh uchun test xabari.\n\n"
+            "Agar siz bu xabarni ko'rayotgan bo'lsangiz, "
+            "VIP guruh to'g'ri sozlangan va real ish e'lonlar "
+            "xuddi shu formatda yuboriladi."
+        ),
+        matched_keywords=["test"],
+    )
+
+    wait_msg = await message.answer(
+        f"⏳ VIP guruhga test xabar yuborilmoqda (<code>{vip_id}</code>)…",
+        parse_mode="HTML",
+    )
+
+    sent = await safe_send_message(client, vip_id, test_post)
+
+    if sent:
+        await wait_msg.edit_text(
+            f"✅ <b>Test muvaffaqiyatli!</b>\n\n"
+            f"VIP guruhni tekshiring: xabar xuddi oddiy ish e'loni kabi ko'rinishi kerak.\n"
+            f"Guruh: <code>{vip_id}</code>",
+            parse_mode="HTML",
+        )
+        logger.info("[admin_bot] VIP group test sent to %s by admin %s", vip_id, message.from_user.id)
+    else:
+        await wait_msg.edit_text(
+            f"❌ <b>Test muvaffaqiyatsiz.</b>\n\n"
+            f"Mumkin bo'lgan sabablar:\n"
+            f"• Bot VIP guruhda admin emas\n"
+            f"• Guruh ID noto'g'ri: <code>{vip_id}</code>\n"
+            f"• Bot guruhga qo'shilmagan\n\n"
+            f"<code>/setprioritygroup clear</code> bilan tozalab qayta sozlang.",
+            parse_mode="HTML",
+        )
+        logger.warning("[admin_bot] VIP group test FAILED for %s", vip_id)
+
+    await message.answer("📋 Asosiy menyu", reply_markup=_main_keyboard())
+
 
 @router.message(Command("reviewqueue"))
 @router.message(F.text.in_({"\U0001f4ec Review Queue: ON \u2705", "\U0001f4ed Review Queue: OFF \u274c"}))
