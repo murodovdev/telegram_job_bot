@@ -910,7 +910,7 @@ async def cmd_stats(message: Message, state: FSMContext):
     if s["by_group"]:
         lines.append("🏆 <b>Top source groups:</b>")
         for i, (title, cnt) in enumerate(s["by_group"], 1):
-            lines.append(f"  {i}. {_html.escape(title)} — <b>{cnt}</b>")
+            lines.append(f"  {i}. {_html.escape(str(title or 'Unknown'))} — <b>{cnt}</b>")
         lines.append("")
 
     if s["by_lang"]:
@@ -918,6 +918,14 @@ async def cmd_stats(message: Message, state: FSMContext):
         for lang, cnt in s["by_lang"].items():
             flag = lang_flags.get(lang, "🌐")
             lines.append(f"  {flag} {lang.capitalize()}: <b>{cnt}</b>")
+        lines.append("")
+
+    if s["by_tier"]:
+        lines.append("🎯 <b>By match tier:</b>")
+        tier_labels = {1: "Tier 1 — exact", 2: "Tier 2 — fuzzy", 3: "Tier 3 — partial"}
+        for tier, cnt in sorted(s["by_tier"].items()):
+            label = tier_labels.get(tier, f"Tier {tier}")
+            lines.append(f"  {label}: <b>{cnt}</b>")
 
     await message.answer(
         "\n".join(lines),

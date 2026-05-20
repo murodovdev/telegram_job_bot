@@ -900,33 +900,44 @@ def record_stat(
     matched_kw: Optional[str],
     match_tier: int = 1,
 ) -> None:
+    # Store timestamp in KST so date-based queries align with the admin's timezone.
+    from datetime import datetime, timezone, timedelta
+    kst = timezone(timedelta(hours=9))
+    now_kst = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
     with _connection() as conn:
         conn.execute(
             """INSERT INTO forwarded_stats
-               (source_chat_id, source_title, matched_lang, matched_kw, match_tier)
-               VALUES (?, ?, ?, ?, ?)""",
-            (source_chat_id, source_title, matched_lang, matched_kw, match_tier),
+               (source_chat_id, source_title, matched_lang, matched_kw, match_tier, forwarded_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (source_chat_id, source_title,
+             matched_lang or None,
+             matched_kw or None,
+             match_tier, now_kst),
         )
 
 
 def get_stats_summary(days: int = 7) -> dict:
     with _connection() as conn:
+        # Use date('now', '+9 hours') so "today" aligns with KST midnight,
+        # not UTC midnight.  forwarded_at is now stored as KST.
         total_row = conn.execute(
             "SELECT COUNT(*) AS cnt FROM forwarded_stats "
-            "WHERE forwarded_at >= datetime('now', ?)",
+            "WHERE forwarded_at >= datetime('now', '+9 hours', ?)",
             (f"-{days} days",),
         ).fetchone()
         total = total_row["cnt"] if total_row else 0
 
         today_row = conn.execute(
             "SELECT COUNT(*) AS cnt FROM forwarded_stats "
-            "WHERE date(forwarded_at) = date('now')"
+            "WHERE date(forwarded_at) = date('now', '+9 hours')"
         ).fetchone()
         today = today_row["cnt"] if today_row else 0
 
+        # MAX(source_title) picks the most recent name if a group was renamed.
         group_rows = conn.execute(
-            "SELECT source_title, COUNT(*) AS cnt FROM forwarded_stats "
-            "WHERE forwarded_at >= datetime('now', ?) "
+            "SELECT MAX(source_title) AS source_title, COUNT(*) AS cnt "
+            "FROM forwarded_stats "
+            "WHERE forwarded_at >= datetime('now', '+9 hours', ?) "
             "GROUP BY source_chat_id ORDER BY cnt DESC LIMIT 10",
             (f"-{days} days",),
         ).fetchall()
@@ -934,14 +945,16 @@ def get_stats_summary(days: int = 7) -> dict:
 
         lang_rows = conn.execute(
             "SELECT matched_lang, COUNT(*) AS cnt FROM forwarded_stats "
-            "WHERE forwarded_at >= datetime('now', ?) GROUP BY matched_lang",
+            "WHERE forwarded_at >= datetime('now', '+9 hours', ?) "
+            "GROUP BY matched_lang",
             (f"-{days} days",),
         ).fetchall()
         by_lang = {r["matched_lang"] or "unknown": r["cnt"] for r in lang_rows}
 
         tier_rows = conn.execute(
             "SELECT match_tier, COUNT(*) AS cnt FROM forwarded_stats "
-            "WHERE forwarded_at >= datetime('now', ?) GROUP BY match_tier",
+            "WHERE forwarded_at >= datetime('now', '+9 hours', ?) "
+            "GROUP BY match_tier",
             (f"-{days} days",),
         ).fetchall()
         by_tier = {r["match_tier"]: r["cnt"] for r in tier_rows}
@@ -957,20 +970,22 @@ def get_daily_summary() -> dict:
     with _connection() as conn:
         total_row = conn.execute(
             "SELECT COUNT(*) AS cnt FROM forwarded_stats "
-            "WHERE date(forwarded_at) = date('now')"
+            "WHERE date(forwarded_at) = date('now', '+9 hours')"
         ).fetchone()
         total = total_row["cnt"] if total_row else 0
 
         group_rows = conn.execute(
-            "SELECT source_title, COUNT(*) AS cnt FROM forwarded_stats "
-            "WHERE date(forwarded_at) = date('now') "
+            "SELECT MAX(source_title) AS source_title, COUNT(*) AS cnt "
+            "FROM forwarded_stats "
+            "WHERE date(forwarded_at) = date('now', '+9 hours') "
             "GROUP BY source_chat_id ORDER BY cnt DESC LIMIT 5"
         ).fetchall()
         by_group = [(r["source_title"], r["cnt"]) for r in group_rows]
 
         lang_rows = conn.execute(
             "SELECT matched_lang, COUNT(*) AS cnt FROM forwarded_stats "
-            "WHERE date(forwarded_at) = date('now') GROUP BY matched_lang"
+            "WHERE date(forwarded_at) = date('now', '+9 hours') "
+            "GROUP BY matched_lang"
         ).fetchall()
         by_lang = {r["matched_lang"] or "unknown": r["cnt"] for r in lang_rows}
 
