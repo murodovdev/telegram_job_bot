@@ -427,108 +427,121 @@ async def _polling_loop(client, account_num: int) -> None:
                     continue
                 _processing_msgs.add(_key)
 
-                # 3. Extract text (plain text or media caption)
-                text = (
-                    getattr(message, "text", None)
-                    or getattr(message, "caption", None)
-                    or getattr(message, "raw_text", None)
-                    or ""
-                )
-                if not text.strip():
-                    continue
-
-                # 4. Keyword filter
-                result = is_job_message(text)
-                if not result.is_job:
-                    continue
-
-                # 5. Keyword-based halal pre-filter (no API call)
-                haram_kw = is_haram_job(text)
-                if haram_kw.is_haram:
-                    db.mark_processed(chat_id, msg_id)
-                    continue
-
-                # 6. Content dedup
-                if DEDUP_WINDOW_HOURS > 0:
-                    is_dup, _ = db.is_content_duplicate(
-                        text,
-                        window_hours=DEDUP_WINDOW_HOURS,
-                        similarity_threshold=DEDUP_SIMILARITY_THRESHOLD,
+                try:
+                    # 3. Extract text (plain text or media caption)
+                    text = (
+                        getattr(message, "text", None)
+                        or getattr(message, "caption", None)
+                        or getattr(message, "raw_text", None)
+                        or ""
                     )
-                    if is_dup:
+                    if not text.strip():
+                        continue
+
+                    # 3.5 Blocked-user gate — O(1) in-memory frozenset lookup
+                    _poll_sender_id = getattr(message, "sender_id", None)
+                    if _poll_sender_id and db.is_blocked_cached(_poll_sender_id):
+                        logger.info(
+                            "[polling/acct%s] SKIPPED (blocked user) | "
+                            "user_id=%s | chat_id=%s | msg_id=%s",
+                            account_num, _poll_sender_id, chat_id, msg_id,
+                        )
                         db.mark_processed(chat_id, msg_id)
                         continue
 
-                # 7. Build post and send
-                if msg_time and msg_time.tzinfo is None:
-                    msg_time = msg_time.replace(tzinfo=timezone.utc)
+                    # 4. Keyword filter
+                    result = is_job_message(text)
+                    if not result.is_job:
+                        continue
 
-                group_link = (
-                    f"https://t.me/{group.username}" if group.username else None
-                )
+                    # 5. Keyword-based halal pre-filter (no API call)
+                    haram_kw = is_haram_job(text)
+                    if haram_kw.is_haram:
+                        db.mark_processed(chat_id, msg_id)
+                        continue
 
-                sender = None
-                try:
-                    sender = await message.get_sender()
-                except Exception:
-                    pass
-
-                post_text = build_job_post(
-                    group_title=group.title,
-                    group_link=group_link,
-                    author_name=get_sender_display_name(sender),
-                    author_link=(
-                        get_user_link(sender) if isinstance(sender, User) else None
-                    ),
-                    message_time=msg_time or utcnow(),
-                    message_text=truncate(text),
-                    matched_keywords=result.matched_keywords,
-                )
-
-                sent_msg = await safe_send_message(client, target, post_text)
-                if sent_msg:
-                    db.mark_processed(chat_id, msg_id)
+                    # 6. Content dedup
                     if DEDUP_WINDOW_HOURS > 0:
-                        db.record_content_hash(
-                            text, source_chat=chat_id, source_msg=msg_id
+                        is_dup, _ = db.is_content_duplicate(
+                            text,
+                            window_hours=DEDUP_WINDOW_HOURS,
+                            similarity_threshold=DEDUP_SIMILARITY_THRESHOLD,
                         )
+                        if is_dup:
+                            db.mark_processed(chat_id, msg_id)
+                            continue
+
+                    # 7. Build post and send
+                    if msg_time and msg_time.tzinfo is None:
+                        msg_time = msg_time.replace(tzinfo=timezone.utc)
+
+                    group_link = (
+                        f"https://t.me/{group.username}" if group.username else None
+                    )
+
+                    sender = None
                     try:
-                        db.save_forwarded_msg(
-                            source_chat=chat_id,
-                            source_msg=msg_id,
-                            target_chat=target,
-                            target_msg_id=sent_msg.id,
-                            post_text=post_text,
-                            sender_id=getattr(message, "sender_id", None),
-                        )
+                        sender = await message.get_sender()
                     except Exception:
                         pass
-                    forwarded += 1
-                    _poll_lag = 0.0
-                    if msg_time:
+
+                    post_text = build_job_post(
+                        group_title=group.title,
+                        group_link=group_link,
+                        author_name=get_sender_display_name(sender),
+                        author_link=(
+                            get_user_link(sender) if isinstance(sender, User) else None
+                        ),
+                        message_time=msg_time or utcnow(),
+                        message_text=truncate(text),
+                        matched_keywords=result.matched_keywords,
+                    )
+
+                    sent_msg = await safe_send_message(client, target, post_text)
+                    if sent_msg:
+                        db.mark_processed(chat_id, msg_id)
+                        if DEDUP_WINDOW_HOURS > 0:
+                            db.record_content_hash(
+                                text, source_chat=chat_id, source_msg=msg_id
+                            )
                         try:
-                            _mt = msg_time if msg_time.tzinfo else msg_time.replace(tzinfo=timezone.utc)
-                            _poll_lag = (utcnow() - _mt).total_seconds()
+                            db.save_forwarded_msg(
+                                source_chat=chat_id,
+                                source_msg=msg_id,
+                                target_chat=target,
+                                target_msg_id=sent_msg.id,
+                                post_text=post_text,
+                                sender_id=getattr(message, "sender_id", None),
+                            )
                         except Exception:
                             pass
-                    logger.info(
-                        "[polling/acct%s] ✅ CAUGHT BY POLL | "
-                        "chat=%s | msg=%s | lag=%.0fs",
-                        account_num, chat_id, msg_id, _poll_lag,
-                    )
-                    # Priority group alert for polling-caught messages
-                    if chat_id in db.get_priority_group_ids_cached():
-                        _fire(
-                            _send_priority_alert(
-                                client=client,
-                                group_title=group.title,
-                                group_link=group_link,
-                                author_name=get_sender_display_name(sender),
-                                formatted_post=post_text,
-                                account_num=account_num,
-                            )
+                        forwarded += 1
+                        _poll_lag = 0.0
+                        if msg_time:
+                            try:
+                                _mt = msg_time if msg_time.tzinfo else msg_time.replace(tzinfo=timezone.utc)
+                                _poll_lag = (utcnow() - _mt).total_seconds()
+                            except Exception:
+                                pass
+                        logger.info(
+                            "[polling/acct%s] ✅ CAUGHT BY POLL | "
+                            "chat=%s | msg=%s | lag=%.0fs",
+                            account_num, chat_id, msg_id, _poll_lag,
                         )
-                _processing_msgs.discard(_key)
+                        # Priority group alert for polling-caught messages
+                        if chat_id in db.get_priority_group_ids_cached():
+                            _fire(
+                                _send_priority_alert(
+                                    client=client,
+                                    group_title=group.title,
+                                    group_link=group_link,
+                                    author_name=get_sender_display_name(sender),
+                                    formatted_post=post_text,
+                                    account_num=account_num,
+                                )
+                            )
+                finally:
+                    _processing_msgs.discard(_key)
 
         if forwarded:
             logger.info(
