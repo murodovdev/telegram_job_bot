@@ -1382,11 +1382,15 @@ async def setup_monitor() -> None:
     # Without this a crashed session could permanently block content
     # that was never actually forwarded.
     _pending_hashes.clear()
-    phone_numbers = {1: PHONE_NUMBER, 2: PHONE_NUMBER_2 or PHONE_NUMBER}
 
     for account_num, client in enumerate(all_clients, start=1):
         logger.info("[monitor] Connecting account %s …", account_num)
-        await client.start(phone=phone_numbers[account_num])
+        await client.connect()
+        if not await client.is_user_authorized():
+            raise RuntimeError(
+                f"Account {account_num} session is not authorized. "
+                "Check SESSION_STRING in your environment variables."
+            )
         me = await client.get_me()
         logger.info(
             "[monitor] Account %s logged in as: %s (id=%s)",
