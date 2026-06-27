@@ -4,6 +4,10 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Put the project root on sys.path so `import bot.*` works when CI invokes the
+# bare `pytest` console script (which, unlike `python -m pytest`, does not add
+# the current directory to sys.path).
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
