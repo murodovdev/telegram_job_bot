@@ -14,7 +14,6 @@ Startup order:
 """
 
 import asyncio
-import logging
 import os
 import pathlib
 import sys
@@ -32,7 +31,6 @@ logger = setup_logging("main")
 
 import bot.database as db
 from bot.client import client_1, client_2, all_clients
-from bot.config import PHONE_NUMBER, PHONE_NUMBER_2, ACCOUNT_2_ENABLED
 from bot.monitor import setup_monitor
 from bot.admin_bot import run_admin_bot, set_telethon_clients
 from bot.scheduler import run_daily_summary_scheduler
@@ -70,6 +68,12 @@ async def main() -> None:
                 await task
             except asyncio.CancelledError:
                 pass
+        # Close the shared Groq aiohttp session so it doesn't leak / warn.
+        try:
+            from bot.groq_halal import close_session
+            await close_session()
+        except Exception:
+            pass
         logger.info("[main] Stopped.")
 
 

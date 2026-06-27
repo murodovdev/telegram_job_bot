@@ -7,14 +7,19 @@ halal_filter.py (kalit so'z filtri) dan O'TGAN xabarlar uchun ishlatiladi.
 Kalit so'z filtridan o'tgan, lekin konteksti noaniq bo'lgan holatlarni
 Groq LLM orqali tekshiradi.
 
-Qaror mantiqi
--------------
-    "halol"   → guruhga yuboriladi ✅
-    "haram"   → bloklaydi ❌
-    "unclear" → guruhga yuboriladi ✅  (noaniq = xavfsiz tomonga xato)
+Qaror mantiqi (monitor.py dagi haqiqiy xulq bilan mos)
+-------------------------------------------------------
+    "halol"   → guruhda qoladi ✅
+    "haram"   → post o'chiriladi va admin review queue ga yuboriladi ❌
+    "unclear" → post o'chiriladi va admin review queue ga yuboriladi ❌
+                (noaniq = diniy xavfsizlik uchun admin tasdig'iga qoldiriladi)
 
-API xatosi yoki timeout bo'lsa → o'tkazib yuboriladi ✅
-(API ishlamay qolsa bot to'xtab qolmasligi uchun)
+Eslatma: Groq tekshiruvi post allaqachon guruhga yuborilgandan KEYIN fonda
+ishlaydi. "haram"/"unclear" bo'lsa post o'chirilib, admin "Tasdiqlash/Rad etish"
+tugmalari bilan review queue ga tushadi (agar review queue YOQIQ bo'lsa).
+
+API xatosi yoki timeout bo'lsa → post guruhda qoladi ✅
+(API ishlamay qolsa bot to'xtab qolmasligi uchun — "xavfsiz" tomon = qoldirish)
 
 Railway Variables
 -----------------

@@ -1,0 +1,19 @@
+# Tooling configuration (lint + tests). No build backend — this project is
+# run as a script, not packaged.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Conservative, low-noise ruleset focused on real bugs rather than style:
+#   F   — pyflakes (undefined names, unused imports, f-string mistakes)
+#   E9  — syntax / runtime-breaking errors
+# Line-length and other cosmetic rules are intentionally left off so the lint
+# stays signal-heavy on this existing codebase.
+select = ["F", "E9"]
+ignore = ["E501"]

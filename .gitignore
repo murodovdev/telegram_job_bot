@@ -1,3 +1,24 @@
+# ── Secrets / credentials (NEVER commit) ──────────────────────────
 .env
+.env.*
+!.env.example
 sessions/
 *.session
+*.session-journal
+
+# ── Runtime data & logs (machine-/deploy-specific) ────────────────
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+job_bot_backup.db
+
+# ── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/

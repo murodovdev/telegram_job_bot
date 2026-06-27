@@ -14,15 +14,16 @@ Changes in v5
 """
 
 import asyncio
+import html as _html
 import re
 import logging
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from telethon import events
 from telethon.tl.types import (
     User,
-    Message,
+    MessageService,
     MessageActionChatAddUser,
     MessageActionChatJoinedByLink,
     MessageActionChatJoinedByRequest,
@@ -31,7 +32,7 @@ from telethon.tl.types import (
 
 import bot.database as db
 from bot.client import client_1, all_clients
-from bot.config import PHONE_NUMBER, PHONE_NUMBER_2, TARGET_GROUP
+from bot.config import PHONE_NUMBER, PHONE_NUMBER_2, TARGET_GROUP, ADMIN_USER_ID
 from bot.config import DEDUP_WINDOW_HOURS, DEDUP_SIMILARITY_THRESHOLD
 from bot.config import GROQ_API_KEY
 from bot.filters import is_job_message
@@ -105,7 +106,6 @@ async def _send_to_review(
     to'liq format bilan guruhga yuboriladi.
     Qaytaradi: True = muvaffaqiyatli, False = xato.
     """
-    from bot.config import ADMIN_USER_ID
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
     review_id = db.add_to_review_queue(
@@ -128,9 +128,6 @@ async def _send_to_review(
     else:
         source_label = "🤖 Groq AI"
     preview = text[:400] + ("…" if len(text) > 400 else "")
-
-    import html as _html
-    from datetime import datetime, timedelta
 
     _KST = timezone(timedelta(hours=9))
     time_display = "—"
@@ -163,10 +160,17 @@ async def _send_to_review(
         f"<b>Xabar matni:</b>\n{_html.escape(preview)}"
     )
 
-    # Telegram enforces a 64-byte limit on callback_data.
+    # Telegram enforces a 64-byte limit on callback_data. review_id is a small
+    # autoincrement int so this is never hit in practice, but guard gracefully
+    # instead of asserting (asserts are stripped under `python -O`).
     approve_cb = f"review:approve:{review_id}"
     reject_cb  = f"review:reject:{review_id}"
-    assert len(approve_cb.encode()) <= 64, f"callback_data too long: {approve_cb}"
+    if len(approve_cb.encode()) > 64 or len(reject_cb.encode()) > 64:
+        logger.error(
+            "[monitor] callback_data exceeds 64 bytes (review_id=%s) — "
+            "review buttons cannot be delivered", review_id,
+        )
+        return False
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
@@ -234,8 +238,6 @@ async def _send_priority_alert(
     # No VIP group — fall back to admin DM via aiogram bot
     if not _aiogram_bot:
         return
-    import html as _html
-    from bot.config import ADMIN_USER_ID
 
     group_part = (
         f'<a href="{_html.escape(group_link)}">{_html.escape(group_title)}</a>'
@@ -460,9 +462,11 @@ async def _polling_loop(client, account_num: int) -> None:
                         db.mark_processed(chat_id, msg_id)
                         continue
 
-                    # 6. Content dedup
+                    # 6. Content dedup — runs the O(n) fuzzy match in a worker
+                    # thread so the SequenceMatcher loop never blocks the loop.
                     if DEDUP_WINDOW_HOURS > 0:
-                        is_dup, _ = db.is_content_duplicate(
+                        is_dup, _ = await asyncio.to_thread(
+                            db.is_content_duplicate,
                             text,
                             window_hours=DEDUP_WINDOW_HOURS,
                             similarity_threshold=DEDUP_SIMILARITY_THRESHOLD,
@@ -584,8 +588,6 @@ def _make_message_handler(assigned_client, account_num: int):
     """
     async def _process_message(event: events.NewMessage.Event) -> None:
         """Full pipeline — runs as an independent asyncio.Task."""
-        from telethon.tl.types import MessageService
-
         message = event.message
         chat_id = event.chat_id
         msg_id  = message.id
@@ -616,7 +618,7 @@ def _make_message_handler(assigned_client, account_num: int):
                 _lag = (utcnow() - _md).total_seconds()
             except Exception:
                 pass
-        logger.info(
+        logger.debug(
             "[monitor/acct%s] SOURCE GROUP HIT | chat_id=%s | msg_id=%s | delivery_lag=%.1fs",
             account_num, chat_id, msg_id, _lag,
         )
@@ -624,7 +626,7 @@ def _make_message_handler(assigned_client, account_num: int):
         # ── 2. Extract text (plain text or media caption) ─────────
         text = getattr(message, "text", None) or getattr(message, "caption", None) or getattr(message, "raw_text", None) or ""
         if not text.strip():
-            logger.info(
+            logger.debug(
                 "[monitor/acct%s] SKIPPED (no text/caption) | chat_id=%s | msg_id=%s",
                 account_num, chat_id, msg_id,
             )
@@ -677,7 +679,7 @@ def _make_message_handler(assigned_client, account_num: int):
 
         # ── 4. Processed-message dedup ────────────────────────────
         if db.is_processed(chat_id, msg_id):
-            logger.info(
+            logger.debug(
                 "[monitor/acct%s] SKIPPED (already processed) | chat_id=%s | msg_id=%s",
                 account_num, chat_id, msg_id,
             )
@@ -696,7 +698,7 @@ def _make_message_handler(assigned_client, account_num: int):
         # ── 5. Keyword filter ─────────────────────────────────────
         result = is_job_message(text)
         if not result.is_job:
-            logger.info(
+            logger.debug(
                 "[monitor/acct%s] SKIPPED (no keywords) | chat_id=%s | msg_id=%s | preview=%r",
                 account_num, chat_id, msg_id, text[:80],
             )
@@ -704,7 +706,7 @@ def _make_message_handler(assigned_client, account_num: int):
 
         # Gate 5.1 — pre-fetch group metadata from the DB (no API call).
         # Sender resolution and Groq are deferred until actually needed.
-        _stored_group    = db.get_source_group_by_id(chat_id)
+        _stored_group    = db.get_source_group_cached(chat_id)
         _pre_group_title = _stored_group.title if _stored_group else "Unknown Group"
         _pre_group_link  = (
             f"https://t.me/{_stored_group.username}"
@@ -789,7 +791,11 @@ def _make_message_handler(assigned_client, account_num: int):
         async def _do_dedup():
             if DEDUP_WINDOW_HOURS <= 0 or content_hash is None:
                 return False, ""
-            return db.is_content_duplicate(
+            # Offload the O(n) fuzzy SequenceMatcher scan to a worker thread so
+            # it runs concurrently with sender resolution and never stalls the
+            # event loop (the documented worst-case hot-path blocker).
+            return await asyncio.to_thread(
+                db.is_content_duplicate,
                 text,
                 window_hours=DEDUP_WINDOW_HOURS,
                 similarity_threshold=DEDUP_SIMILARITY_THRESHOLD,

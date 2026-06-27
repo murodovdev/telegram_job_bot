@@ -22,7 +22,7 @@ from typing import Any, Optional
 KST = timezone(timedelta(hours=9))
 
 from telethon import TelegramClient
-from telethon.tl.types import User, Chat, Channel, Message
+from telethon.tl.types import User
 
 from bot.config import LOG_LEVEL
 
@@ -163,12 +163,26 @@ def get_chat_display_name(chat) -> str:
 #      → Telegram never issues FloodWait
 #      → 1 post = instant, 5 posts = 0s/3s/6s/9s/12s
 
-MAX_RETRIES    = 3
-RETRY_DELAY    = 5
-_send_lock     : Any   = None
-_last_send_at  : float = 0.0
-_flood_until   : float = 0.0    # time.monotonic() when active FloodWait expires
-_SEND_MIN_GAP  : float = 3.1    # seconds between sends (Telegram ~20/min limit)
+MAX_RETRIES       = 3
+RETRY_DELAY       = 5
+MAX_FLOOD_RETRIES = 5      # cap consecutive FloodWait sleeps so a persistent
+                          # flood can never loop forever (each still sleeps,
+                          # but after this many we give up and drop the message)
+_SEND_MIN_GAP     : float = 3.1    # seconds between sends (Telegram ~20/min limit)
+
+# Per-client rate-limit state. Each Telegram account has INDEPENDENT flood
+# limits, so accounts must not share a lock/gap: a single shared limiter
+# serialises account 2 behind account 1 and lets one account's FloodWait
+# stall the other. Keyed by the client object (hashable by identity).
+_send_state: dict = {}    # {client: {"lock": Lock, "last": float, "flood_until": float}}
+
+
+def _get_send_state(client) -> dict:
+    st = _send_state.get(client)
+    if st is None:
+        st = {"lock": asyncio.Lock(), "last": 0.0, "flood_until": 0.0}
+        _send_state[client] = st
+    return st
 
 
 async def safe_send_message(
@@ -177,69 +191,75 @@ async def safe_send_message(
     text: str,
 ) -> Optional[Any]:
     """
-    Send in HTML mode with rate limiting, proper FloodWait handling, and retry.
+    Send in HTML mode with per-account rate limiting, proper FloodWait
+    handling, and retry.
 
     THE FIX FOR 6-MINUTE DELAYS:
     The old code held asyncio.Lock during FloodWait sleep. All other messages
     were blocked for the full FloodWait duration (e.g. 360 seconds) while
     waiting to acquire the lock.
 
-    New design uses _flood_until: tasks check it BEFORE acquiring the lock
-    and wait OUTSIDE the lock. During a 360s FloodWait:
+    Design: per-client `flood_until` is checked BEFORE acquiring that client's
+    lock, so tasks wait OUTSIDE the lock (in parallel). During a 360s FloodWait:
       Old: all N tasks blocked 360s + N*3.1s = up to 10 minutes
       New: all tasks wait ~360s (in parallel, outside lock) = ~360s max
+    Each account has its own lock/state, so accounts never block each other.
     """
     from telethon.errors import FloodWaitError
-    global _send_lock, _last_send_at, _flood_until
+    st = _get_send_state(client)
 
-    if _send_lock is None:
-        _send_lock = asyncio.Lock()
-
-    # Step 1: wait for active FloodWait OUTSIDE the lock
+    # Step 1: wait for THIS client's active FloodWait OUTSIDE the lock
     # This is the critical fix — tasks wait in parallel, not sequentially
     now = time.monotonic()
-    if _flood_until > now:
-        remaining = _flood_until - now
+    if st["flood_until"] > now:
+        remaining = st["flood_until"] - now
         logger.info(
             "[utils] FloodWait active: waiting %.0fs outside lock", remaining,
         )
         await asyncio.sleep(remaining)
 
-    async with _send_lock:
+    async with st["lock"]:
         # Step 2: re-check inside lock (another task may have triggered FloodWait)
         now = time.monotonic()
-        if _flood_until > now:
-            await asyncio.sleep(_flood_until - now)
+        if st["flood_until"] > now:
+            await asyncio.sleep(st["flood_until"] - now)
 
         # Step 3: rate-limit gap (prevents rapid burst → FloodWait)
-        elapsed = time.monotonic() - _last_send_at
-        if _last_send_at > 0 and elapsed < _SEND_MIN_GAP:
+        elapsed = time.monotonic() - st["last"]
+        if st["last"] > 0 and elapsed < _SEND_MIN_GAP:
             gap = _SEND_MIN_GAP - elapsed
             logger.debug("[utils] rate-limit pause %.2fs", gap)
             await asyncio.sleep(gap)
 
         # Step 4: send with retry
         attempt = 0
-        _send_start = time.monotonic()
+        flood_retries = 0
         while attempt < MAX_RETRIES:
             attempt += 1
             try:
                 sent = await client.send_message(
                     target, text, parse_mode="html", link_preview=False,
                 )
-                _last_send_at = time.monotonic()
+                st["last"] = time.monotonic()
                 return sent
 
             except FloodWaitError as e:
+                flood_retries += 1
+                if flood_retries > MAX_FLOOD_RETRIES:
+                    logger.error(
+                        "[utils] FloodWait persisted after %d sleeps — message dropped.",
+                        MAX_FLOOD_RETRIES,
+                    )
+                    return None
                 wait = e.seconds + 5
-                _flood_until = time.monotonic() + wait   # signal other tasks
+                st["flood_until"] = time.monotonic() + wait   # signal other tasks
                 logger.warning(
                     "[utils] FloodWait %ds — sleeping (others wait outside lock)",
                     e.seconds,
                 )
                 await asyncio.sleep(wait)
-                _flood_until = 0.0   # clear after our sleep
-                attempt -= 1         # FloodWait does not count as a retry
+                st["flood_until"] = 0.0   # clear after our sleep
+                attempt -= 1              # FloodWait does not count as a retry
 
             except Exception as exc:
                 logger.warning(
@@ -255,7 +275,14 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def truncate(text: str, max_len: int = 3500) -> str:
+def truncate(text: str, max_len: int = 3000) -> str:
+    """Cap message body length.
+
+    Budget is deliberately well under Telegram's 4096-char message limit:
+    build_job_post() adds a header (~150 chars) and HTML-escapes the body
+    (which can expand special chars up to ~6x), so a conservative raw cap
+    keeps the final rendered post safely within the limit.
+    """
     if len(text) <= max_len:
         return text
     return text[:max_len] + "…"

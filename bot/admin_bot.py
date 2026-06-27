@@ -871,22 +871,26 @@ async def cmd_test_halal_receive(message: Message, state: FSMContext):
         lines[-1] = "2️⃣ <b>Groq AI:</b> ⚠️ API xatosi — tekshirib bo'lmadi"
         lines.append("\n⚠️ <b>Xulosa: O'TKAZIB YUBORILADI</b>")
         lines.append("API ishlamay qolsa bot to'xtab qolmasligi uchun o'tkazib yuboriladi.")
-    elif groq.verdict == "halol" or groq.verdict == "unclear":
+    elif groq.verdict == "halol":
         reason_safe = _html.escape(groq.reason or "")
-        verdict_label = "✅ HALOL" if groq.verdict == "halol" else "🤔 NOANIQ (unclear)"
-        lines[-1] = f"2️⃣ <b>Groq AI:</b> {verdict_label}"
+        lines[-1] = "2️⃣ <b>Groq AI:</b> ✅ HALOL"
         if reason_safe:
             lines.append(f"   Sabab: <i>{reason_safe}</i>")
-        if groq.verdict == "unclear":
-            lines.append("   <i>Noaniq holatlar o'tkazib yuboriladi (ehtiyotkor yondashuv)</i>")
-        lines.append("\n✅ <b>Xulosa: GURUHGA YUBORILADI</b>")
+        lines.append("\n✅ <b>Xulosa: GURUHDA QOLADI</b>")
+    elif groq.verdict == "unclear":
+        reason_safe = _html.escape(groq.reason or "")
+        lines[-1] = "2️⃣ <b>Groq AI:</b> 🤔 NOANIQ (unclear)"
+        if reason_safe:
+            lines.append(f"   Sabab: <i>{reason_safe}</i>")
+        lines.append("   <i>Noaniq holatlar diniy xavfsizlik uchun admin tasdig'iga qoldiriladi</i>")
+        lines.append("\n🚫 <b>Xulosa: O'CHIRILIB, REVIEW QUEUE GA YUBORILADI</b>")
     else:
         reason_safe = _html.escape(groq.reason or "")
         verdict_safe = _html.escape(groq.verdict or "")
         lines[-1] = f"2️⃣ <b>Groq AI:</b> ❌ {verdict_safe.upper()}"
         if reason_safe:
             lines.append(f"   Sabab: <i>{reason_safe}</i>")
-        lines.append("\n🚫 <b>Xulosa: BLOKLANGAN</b> (Groq AI)")
+        lines.append("\n🚫 <b>Xulosa: O'CHIRILIB, REVIEW QUEUE GA YUBORILADI</b> (Groq AI)")
 
     await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=_main_keyboard())
 

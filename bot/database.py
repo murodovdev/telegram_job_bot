@@ -23,13 +23,17 @@ Changes in v5 (user blocking)
 import sqlite3
 import logging
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Generator, List, Optional
 
 from bot.config import DATABASE_PATH
 
 logger = logging.getLogger(__name__)
+
+# Guard so init_db() is a no-op after the first successful run. Both main.py
+# and run_admin_bot() call it; without this the schema migration, table
+# pruning and cache warm-up all run twice on startup.
+_db_initialised: bool = False
 
 
 # ── Data-Transfer Objects ────────────────────────────────────────
@@ -75,7 +79,15 @@ def _connection() -> Generator[sqlite3.Connection, None, None]:
 # ── Schema ────────────────────────────────────────────────────────
 
 def init_db() -> None:
-    """Create / migrate all tables. Safe to call on every startup."""
+    """Create / migrate all tables. Safe to call on every startup.
+
+    Idempotent: subsequent calls return immediately so the migration,
+    pruning and cache warm-up only happen once per process.
+    """
+    global _db_initialised
+    if _db_initialised:
+        logger.debug("[DB] init_db() already run — skipping")
+        return
     with _connection() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS source_groups (
@@ -260,6 +272,8 @@ def init_db() -> None:
     _cache_refresh_blocked_users()
     _cache_refresh_target()
 
+    _db_initialised = True
+
 
 # ── In-memory hot-path cache ─────────────────────────────────────
 #
@@ -277,6 +291,7 @@ def init_db() -> None:
 # no I/O, no event-loop blocking.
 
 _source_group_ids_by_account: dict = {}  # {account_num: frozenset(chat_ids)}
+_source_group_by_id: dict = {}           # {chat_id: SourceGroup} — hot-path lookup cache
 _priority_group_ids: frozenset = frozenset()  # priority group chat_ids
 _blocked_user_ids: frozenset = frozenset()
 _cached_target_id: Optional[int] = None
@@ -287,21 +302,22 @@ _blocked_cache_ready: bool = False
 
 
 def _cache_refresh_source_groups() -> None:
-    """Rebuild the source-group ID cache (and priority set) from the database."""
-    global _source_group_ids_by_account, _priority_group_ids
+    """Rebuild the source-group caches (id-sets, priority set, by-id map) from the database."""
+    global _source_group_ids_by_account, _priority_group_ids, _source_group_by_id
     with _connection() as conn:
-        rows = conn.execute(
-            "SELECT chat_id, assigned_account, is_priority FROM source_groups"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM source_groups").fetchall()
     by_account: dict = {}
     priority: set = set()
+    by_id: dict = {}
     for row in rows:
-        acct = row["assigned_account"]
-        by_account.setdefault(acct, set()).add(row["chat_id"])
-        if row["is_priority"]:
-            priority.add(row["chat_id"])
+        group = SourceGroup(**dict(row))
+        by_account.setdefault(group.assigned_account, set()).add(group.chat_id)
+        by_id[group.chat_id] = group
+        if group.is_priority:
+            priority.add(group.chat_id)
     _source_group_ids_by_account = {k: frozenset(v) for k, v in by_account.items()}
     _priority_group_ids = frozenset(priority)
+    _source_group_by_id = by_id
     logger.debug("[DB] source-group cache refreshed: %s",
                  {k: len(v) for k, v in _source_group_ids_by_account.items()})
 
@@ -518,6 +534,25 @@ def get_source_group_ids(account: Optional[int] = None) -> List[int]:
     return [r["chat_id"] for r in rows]
 
 
+def get_source_group_cached(chat_id: int) -> Optional[SourceGroup]:
+    """
+    O(1) hot-path read — returns a SourceGroup from the in-memory by-id cache.
+    Tries both the raw and -100-normalised forms so legacy rows are still found.
+    Falls back to a live DB query only on a cache miss.
+    """
+    if not _source_group_by_id:
+        _cache_refresh_source_groups()
+    group = _source_group_by_id.get(chat_id)
+    if group is not None:
+        return group
+    # Try the -100-normalised counterpart for legacy positive ids
+    if chat_id > 0:
+        group = _source_group_by_id.get(int(f"-100{chat_id}"))
+        if group is not None:
+            return group
+    return get_source_group_by_id(chat_id)
+
+
 def get_source_group_by_id(chat_id: int) -> Optional[SourceGroup]:
     """
     Find a source group by chat_id.
@@ -528,8 +563,15 @@ def get_source_group_by_id(chat_id: int) -> Optional[SourceGroup]:
     if chat_id > 0:
         candidates = (chat_id, int(f"-100{chat_id}"))
     else:
-        # e.g. -1002000748619  →  also try the bare positive 2000748619
-        bare = int(str(chat_id).lstrip("-").lstrip("100") or "0") if str(abs(chat_id)).startswith("100") else abs(chat_id)
+        # e.g. -1001000748619 → also try the bare channel id 1000748619.
+        # Strip the exact "100" prefix with slicing (s[3:]); do NOT use
+        # lstrip("100"), which removes EVERY leading 1/0 char and mangles
+        # ids such as -1001000748619 → 748619 instead of 1000748619.
+        s = str(abs(chat_id))
+        if s.startswith("100") and len(s) > 3:
+            bare = int(s[3:])
+        else:
+            bare = abs(chat_id)
         candidates = (chat_id, bare)
 
     with _connection() as conn:
@@ -732,7 +774,17 @@ def is_content_duplicate(
         stored = row["norm_text"][:500]
         if not stored:
             continue
-        ratio = SequenceMatcher(None, norm_sample, stored, autojunk=False).ratio()
+        # Cheap upper-bound sieve before the expensive ratio():
+        # real_quick_ratio() (length-only) and quick_ratio() (char counts) are
+        # both guaranteed >= ratio(), so if either is below the threshold the
+        # full match cannot pass — skip it. This avoids the costly diff for the
+        # vast majority of non-matching rows.
+        sm = SequenceMatcher(None, norm_sample, stored, autojunk=False)
+        if sm.real_quick_ratio() < similarity_threshold:
+            continue
+        if sm.quick_ratio() < similarity_threshold:
+            continue
+        ratio = sm.ratio()
         if ratio >= similarity_threshold:
             return True, (
                 f"near-duplicate (similarity={ratio:.2f}) of msg "

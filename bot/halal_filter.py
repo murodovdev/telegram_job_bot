@@ -235,7 +235,7 @@ HARAM_CATEGORIES: dict[str, list[str]] = {
         "cj",
         "Cj",
         "cJ",
-        "GONJIAM CJ"
+        "GONJIAM CJ",
         "Gonjiam CJ",
         "gonjiam cj",
         "gonchiam cj",
