@@ -20,11 +20,14 @@ import pathlib
 import sys
 
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
+    BotCommand,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -39,8 +42,14 @@ import bot.database as db
 from bot.filters import is_job_message
 from bot.halal_filter import is_haram_job
 from bot.groq_halal import check_halal_with_groq
-from bot.notifier import set_bot as notifier_set_bot
-from bot.utils import setup_logging, safe_send_message, truncate, utcnow
+from bot.notifier import set_bot as notifier_set_bot, notify_admin
+from bot.utils import (
+    setup_logging,
+    safe_send_message,
+    truncate,
+    utcnow,
+    build_job_post,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +92,10 @@ class UnblockUserState(StatesGroup):
     waiting_for_selection = State()
 
 
+class SetVipState(StatesGroup):
+    waiting_for_input = State()
+
+
 # ── Auth guard ────────────────────────────────────────────────────
 
 async def _is_admin(message: Message) -> bool:
@@ -94,30 +107,74 @@ async def _is_admin(message: Message) -> bool:
 
 # ── Keyboards ─────────────────────────────────────────────────────
 
-def _ai_filter_label() -> str:
-    """Return the current AI filter button label reflecting live state."""
-    return "🤖 AI Filter: ON ✅" if db.is_ai_filter_enabled() else "🤖 AI Filter: OFF ❌"
-
-
-def _review_queue_label() -> str:
-    """Return the current review queue button label reflecting live state."""
-    return "📬 Review Queue: ON ✅" if db.is_review_queue_enabled() else "📭 Review Queue: OFF ❌"
-
-
 def _main_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Reply menu — grouped into logical pairs:
+      Groups    → List / Add / Remove / Set Target
+      Insights  → Status / Stats
+      Testing   → Test Keyword / Test Halal / Check Groups / Test Send
+      Priority  → Watch / Unwatch
+      Admin     → Blocked Users / Settings
+    """
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📋 List Groups"),  KeyboardButton(text="➕ Add Group")],
             [KeyboardButton(text="➖ Remove Group"), KeyboardButton(text="🎯 Set Target")],
-            [KeyboardButton(text="📊 Status"),       KeyboardButton(text="🧪 Test Send")],
-            [KeyboardButton(text="📈 Stats"),        KeyboardButton(text="🔍 Test Keyword")],
-            [KeyboardButton(text="🔎 Check Groups"), KeyboardButton(text="🚫 Blocked Users")],
-            [KeyboardButton(text="🕌 Test Halal"),   KeyboardButton(text=_ai_filter_label())],
+            [KeyboardButton(text="📊 Status"),       KeyboardButton(text="📈 Stats")],
+            [KeyboardButton(text="🔍 Test Keyword"), KeyboardButton(text="🕌 Test Halal")],
+            [KeyboardButton(text="🔎 Check Groups"), KeyboardButton(text="🧪 Test Send")],
             [KeyboardButton(text="⭐ Watch Group"),   KeyboardButton(text="❌ Unwatch Group")],
-            [KeyboardButton(text=_review_queue_label())],
+            [KeyboardButton(text="🚫 Blocked Users"), KeyboardButton(text="⚙️ Settings")],
         ],
         resize_keyboard=True,
     )
+
+
+# ── Settings inline panel ─────────────────────────────────────────
+# AI Filter / Review Queue / VIP group live here instead of on the
+# reply keyboard. Because the panel is re-rendered (edit_text) on every
+# toggle, the state shown is always fresh — no stale-button problem.
+
+def _settings_text() -> str:
+    ai  = "ON ✅"  if db.is_ai_filter_enabled()     else "OFF ❌"
+    rq  = "ON ✅"  if db.is_review_queue_enabled()  else "OFF ❌"
+    vip = db.get_priority_group_target()
+    vip_line = f"<code>{vip}</code>" if vip else "❌ Not set"
+    return (
+        "⚙️ <b>Settings</b>\n\n"
+        f"🤖 <b>AI Filter (Groq):</b> {ai}\n"
+        f"📬 <b>Review Queue:</b> {rq}\n"
+        f"⭐ <b>VIP Group:</b> {vip_line}\n\n"
+        "<i>Quyidagi tugmalar orqali sozlamalarni o'zgartiring.</i>"
+    )
+
+
+def _settings_keyboard() -> InlineKeyboardMarkup:
+    ai_on = db.is_ai_filter_enabled()
+    rq_on = db.is_review_queue_enabled()
+    vip   = db.get_priority_group_target()
+    rows = [
+        [InlineKeyboardButton(
+            text=("🤖 AI Filter: ON ✅" if ai_on else "🤖 AI Filter: OFF ❌"),
+            callback_data="set:ai",
+        )],
+        [InlineKeyboardButton(
+            text=("📬 Review Queue: ON ✅" if rq_on else "📭 Review Queue: OFF ❌"),
+            callback_data="set:rq",
+        )],
+    ]
+    if vip:
+        rows.append([
+            InlineKeyboardButton(text="⭐ Change VIP", callback_data="set:vip"),
+            InlineKeyboardButton(text="🗑 Clear VIP",  callback_data="set:vipclear"),
+        ])
+    else:
+        rows.append([InlineKeyboardButton(text="⭐ Set VIP Group", callback_data="set:vip")])
+    rows.append([
+        InlineKeyboardButton(text="🔄 Refresh", callback_data="set:refresh"),
+        InlineKeyboardButton(text="✖️ Close",   callback_data="set:close"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def _remove_keyboard(groups: list) -> InlineKeyboardMarkup:
     buttons = []
@@ -125,9 +182,9 @@ def _remove_keyboard(groups: list) -> InlineKeyboardMarkup:
         badge = " [A2]" if g.assigned_account == 2 else ""
         buttons.append([InlineKeyboardButton(
             text=f"❌ {g.title}{badge}",
-            callback_data=f"rm:{g.chat_id}",
+            callback_data=f"rmask:{g.chat_id}",   # asks for confirmation first
         )])
-    buttons.append([InlineKeyboardButton(text="🔙 Cancel", callback_data="rm:cancel")])
+    buttons.append([InlineKeyboardButton(text="🔙 Cancel", callback_data="rmask:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -294,18 +351,20 @@ async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     acct2_line = "\n• Account 2 is <b>enabled</b> ✅" if ACCOUNT_2_ENABLED else ""
     await message.answer(
-        "👋 <b>Korea Ish E'lonlari Admin Bot</b>\n\n"
-        "Commands:\n"
-        "• /listgroups — monitored source groups\n"
-        "• /addgroup — add a source group\n"
-        "• /removegroup — remove a group\n"
-        "• /settarget — set output group\n"
-        "• /testkeyword — test if a message would be detected\n"
-        "• /stats — analytics &amp; statistics\n"
-        "• /test — send a test message to target\n"
-        "• /status — current config\n"
-        "• /checkgroups — membership check for all accounts\n"
-        "• /aifilter — toggle the Groq AI halal filter on/off"
+        "👋 <b>Korea Ish E'lonlari — Admin Panel</b>\n\n"
+        "Quyidagi menyudan foydalaning yoki <b>“/”</b> tugmasini bosib "
+        "barcha buyruqlarni ko'ring.\n\n"
+        "<b>📂 Groups</b>\n"
+        "• 📋 List / ➕ Add / ➖ Remove / 🎯 Set Target\n\n"
+        "<b>📊 Insights</b>\n"
+        "• 📊 Status — ulanish, target, VIP, funnel\n"
+        "• 📈 Stats — 7 kunlik analitika\n\n"
+        "<b>🧪 Testing</b>\n"
+        "• 🔍 Test Keyword · 🕌 Test Halal · 🔎 Check Groups · 🧪 Test Send\n\n"
+        "<b>⚙️ Admin</b>\n"
+        "• ⭐ Watch / ❌ Unwatch — priority guruhlar\n"
+        "• 🚫 Blocked Users — bloklash / blokdan chiqarish\n"
+        "• ⚙️ Settings — AI Filter, Review Queue, VIP guruh"
         + acct2_line,
         parse_mode="HTML",
         reply_markup=_main_keyboard(),
@@ -494,7 +553,10 @@ async def _do_add_group(
         await message.answer(
             f"✅ <b>Source group added!</b>\n\n"
             f"🏢 <b>{_html.escape(title)}</b>\n"
-            f"🆔 <code>{chat_id}</code>{link_line}{acct_label}",
+            f"🆔 <code>{chat_id}</code>{link_line}{acct_label}\n\n"
+            f"🟢 Monitoring starts automatically within ~15s "
+            f"(backup poller). For <i>instant</i> event-based detection, "
+            f"restart the bot once.",
             parse_mode="HTML",
             reply_markup=_main_keyboard(),
         )
@@ -572,6 +634,34 @@ async def cmd_remove_group_start(message: Message, state: FSMContext):
         parse_mode="HTML",
         reply_markup=_remove_keyboard(groups),
     )
+
+
+@router.callback_query(F.data.startswith("rmask:"))
+async def cb_remove_ask(callback: CallbackQuery):
+    """Confirmation step before a group is actually removed."""
+    if callback.from_user.id != ADMIN_USER_ID:
+        await callback.answer("Access denied.", show_alert=True)
+        return
+    payload = callback.data[len("rmask:"):]
+    if payload == "cancel":
+        await callback.message.edit_text("Cancelled.")
+        await callback.message.answer("Back to menu.", reply_markup=_main_keyboard())
+        await callback.answer()
+        return
+    chat_id = int(payload)
+    groups  = db.list_source_groups()
+    title   = next((g.title for g in groups if g.chat_id == chat_id), str(chat_id))
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Yes, remove", callback_data=f"rm:{chat_id}"),
+        InlineKeyboardButton(text="🔙 Cancel",      callback_data="rmask:cancel"),
+    ]])
+    await callback.message.edit_text(
+        f"⚠️ Remove <b>{_html.escape(title)}</b>?\n"
+        f"🆔 <code>{chat_id}</code>\n\n"
+        f"Monitoring of this group will stop. You can re-add it later.",
+        reply_markup=keyboard,
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("rm:"))
@@ -726,10 +816,19 @@ async def cb_review(callback: CallbackQuery):
     action    = parts[1]   # "approve" yoki "reject"
     review_id = int(parts[2])
 
+    # Preserve the original message's HTML faithfully. callback.message.text
+    # is RENDERED plain text (entities stripped) — re-sending it with HTML
+    # parse mode breaks whenever the post contains <, > or &. html_text
+    # rebuilds valid, properly-escaped HTML from the message entities.
+    try:
+        orig_html = callback.message.html_text or ""
+    except Exception:
+        orig_html = _html.escape(callback.message.text or "")
+
     item = db.get_review_item(review_id)
     if not item:
         await callback.message.edit_text(
-            callback.message.text + "\n\n⚠️ <i>Bu e'lon allaqachon qayta ishlangan yoki muddati o'tgan.</i>",
+            orig_html + "\n\n⚠️ <i>Bu e'lon allaqachon qayta ishlangan yoki muddati o'tgan.</i>",
             parse_mode="HTML",
             reply_markup=None,
         )
@@ -739,7 +838,7 @@ async def cb_review(callback: CallbackQuery):
     if action == "reject":
         db.delete_review_item(review_id)
         await callback.message.edit_text(
-            (callback.message.text or "") + "\n\n❌ Rad etildi.",
+            orig_html + "\n\n❌ Rad etildi.",
             parse_mode="HTML",
             reply_markup=None,
         )
@@ -769,27 +868,15 @@ async def cb_review(callback: CallbackQuery):
         if msg_time.tzinfo is None:
             msg_time = msg_time.replace(tzinfo=timezone.utc)
 
-        import html as _html
-        from datetime import timedelta
-
-        KST = timezone(timedelta(hours=9))
-        kst_time = msg_time.astimezone(KST)
-        time_str = kst_time.strftime("%Y-%m-%d %H:%M:%S")
-
-        safe_group  = _html.escape(group_title)
-        safe_author = _html.escape(author_name)
-        safe_text   = _html.escape(truncate(post_text))
-
-        group_part  = f'<a href="{_html.escape(group_link)}">{safe_group}</a>' if group_link else safe_group
-        author_part = f'<a href="{_html.escape(author_link)}">{safe_author}</a>' if author_link else safe_author
-
-        formatted = (
-            f"⚠️ <b>Yangi ish e'loni:</b>\n\n"
-            f"<b>Guruh:</b> {group_part}\n"
-            f"<b>Muallif:</b> {author_part}\n"
-            f"<b>Vaqt:</b> {time_str}\n\n"
-            f"<b>Xabar matni:</b>\n"
-            f"{safe_text}"
+        # Use the shared formatter so approved posts look identical to the
+        # ones forwarded automatically by monitor.py (single source of truth).
+        formatted = build_job_post(
+            group_title=group_title,
+            group_link=group_link,
+            author_name=author_name,
+            author_link=author_link,
+            message_time=msg_time,
+            message_text=truncate(post_text),
         )
 
         success = False
@@ -799,7 +886,7 @@ async def cb_review(callback: CallbackQuery):
         if success:
             db.delete_review_item(review_id)
             await callback.message.edit_text(
-                (callback.message.text or "") + "\n\n✅ Tasdiqlandi va guruhga yuborildi.",
+                orig_html + "\n\n✅ Tasdiqlandi va guruhga yuborildi.",
                 parse_mode="HTML",
                 reply_markup=None,
             )
@@ -807,7 +894,7 @@ async def cb_review(callback: CallbackQuery):
             logger.info("[admin_bot] Review %d approved and forwarded.", review_id)
         else:
             await callback.message.edit_text(
-                (callback.message.text or "") + "\n\n⚠️ Yuborishda xato. Qayta urinib ko'ring.",
+                orig_html + "\n\n⚠️ Yuborishda xato. Qayta urinib ko'ring.",
                 parse_mode="HTML",
                 reply_markup=None,
             )
@@ -993,6 +1080,8 @@ async def cmd_status(message: Message, state: FSMContext):
     groups_a2 = db.list_source_groups(account=2)
     target     = db.get_target_group()
     processed  = db.get_processed_count()
+    pending    = db.count_review_queue()
+    blocked    = len(db.list_blocked_users())
 
     def _conn_status(client, label):
         if client and client.is_connected():
@@ -1021,9 +1110,15 @@ async def cmd_status(message: Message, state: FSMContext):
         pcount = len(db.list_priority_groups())
         lines.append(f"⭐ VIP Group: <code>{vip_id}</code> ({pcount} priority source(s))")
     else:
-        lines.append("⭐ VIP Group: ❌ Not set — use /setprioritygroup")
+        lines.append("⭐ VIP Group: ❌ Not set — use ⚙️ Settings")
 
+    lines.append("")
+    ai_state = "ON ✅"  if db.is_ai_filter_enabled()    else "OFF ❌"
+    rq_state = "ON ✅"  if db.is_review_queue_enabled() else "OFF ❌"
+    lines.append(f"🤖 AI Filter: <b>{ai_state}</b>   📬 Review Queue: <b>{rq_state}</b>")
     lines.append(f"📨 Total forwarded: <b>{processed}</b>")
+    lines.append(f"📭 Awaiting review: <b>{pending}</b>")
+    lines.append(f"🚫 Blocked users: <b>{blocked}</b>")
 
     await message.answer(
         "\n".join(lines),
@@ -1151,7 +1246,7 @@ async def cmd_block_start(message: Message, state: FSMContext):
         return
     await state.clear()
 
-    # "🚫 Blocked Users" button shows the list + block/unblock options
+    # "🚫 Blocked Users" button shows the list + tappable block/unblock actions
     blocked = db.list_blocked_users()
     lines = [f"🚫 <b>Blocked Users ({len(blocked)})</b>\n"]
     if blocked:
@@ -1167,14 +1262,50 @@ async def cmd_block_start(message: Message, state: FSMContext):
     else:
         lines.append("No users are currently blocked.")
 
-    lines.append("\nUse /addblock to block a user.")
-    lines.append("Use /unblockuser to unblock a user.")
+    kb_rows = [[InlineKeyboardButton(text="➕ Block User", callback_data="blk:add")]]
+    if blocked:
+        kb_rows.append([InlineKeyboardButton(text="✅ Unblock User", callback_data="blk:unblock")])
 
     await message.answer(
         "\n".join(lines),
         parse_mode="HTML",
-        reply_markup=_main_keyboard(),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows),
     )
+
+
+@router.callback_query(F.data.startswith("blk:"))
+async def cb_blocked_actions(callback: CallbackQuery, state: FSMContext):
+    """Inline Block / Unblock actions from the Blocked Users view."""
+    if callback.from_user.id != ADMIN_USER_ID:
+        await callback.answer("Access denied.", show_alert=True)
+        return
+    action = callback.data.split(":", 1)[1]
+    await callback.answer()
+
+    if action == "add":
+        await state.set_state(BlockUserState.waiting_for_user)
+        await callback.message.answer(
+            "🚫 <b>Block a User</b>\n\n"
+            "Send the user's Telegram ID, or <b>forward any message</b> from "
+            "that user to this chat.\n\n"
+            "💡 To get a user's ID: forward their message to @userinfobot.\n\n"
+            "/cancel to abort.",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    elif action == "unblock":
+        blocked = db.list_blocked_users()
+        if not blocked:
+            await callback.message.answer(
+                "ℹ️ No users are currently blocked.",
+                reply_markup=_main_keyboard(),
+            )
+            return
+        await callback.message.answer(
+            "✅ <b>Unblock a User</b>\n\nTap a user to unblock them:",
+            parse_mode="HTML",
+            reply_markup=_unblock_keyboard(blocked),
+        )
 
 
 @router.message(Command("addblock"))
@@ -1653,22 +1784,28 @@ async def handle_importgroups_data(message: Message, state: FSMContext):
         return
 
     # ── Databasega saqlash ──────────────────────────────────────
+    # add_source_group() returns True on insert, False on duplicate (it does
+    # NOT raise on duplicates), so we count via the return value — not via a
+    # never-hit except branch. Real DB errors still surface as `errors`.
     for chat_id, title, username, account in parsed:
+        # Normalise positive IDs to the -100 supergroup form so monitoring
+        # actually matches incoming events (mirrors _do_add_group).
+        if chat_id > 0:
+            chat_id = int(f"-100{chat_id}")
         try:
-            db.add_source_group(
+            ok = db.add_source_group(
                 chat_id=chat_id,
                 title=title,
                 username=username,
                 assigned_account=account,
             )
-            added += 1
-        except Exception as e:
-            err_str = str(e).lower()
-            if "unique" in err_str or "duplicate" in err_str or "already" in err_str:
-                skipped += 1
+            if ok:
+                added += 1
             else:
-                errors += 1
-                logger.warning("[importgroups] %s: %s", chat_id, e)
+                skipped += 1
+        except Exception as e:
+            errors += 1
+            logger.warning("[importgroups] %s: %s", chat_id, e)
 
     # ── Natija ─────────────────────────────────────────────────
     total = db.list_source_groups()
@@ -1683,7 +1820,11 @@ async def handle_importgroups_data(message: Message, state: FSMContext):
     result += f"\n📊 Jami database da: <b>{len(total)}</b> ta guruh"
 
     if added > 0:
-        result += "\n\n⚠️ Botni qayta ishga tushiring (Railway Redeploy)."
+        result += (
+            "\n\n🟢 Yangi guruhlar ~15 soniya ichida avtomatik kuzatila "
+            "boshlanadi (backup poller). Darhol event-detection uchun botni "
+            "bir marta qayta ishga tushiring."
+        )
 
     logger.info(
         "[admin_bot] importgroups: parsed=%d added=%d skipped=%d errors=%d",
@@ -1925,11 +2066,171 @@ async def cmd_toggle_review_queue(message: Message, state: FSMContext):
     )
 
 
+# ── ⚙️ Settings inline panel ──────────────────────────────────────
+#
+# Single home for AI Filter, Review Queue and the VIP group. Because the
+# panel re-renders itself on every change (edit_text), the state shown is
+# always live — there is no stale-button problem like the old reply-keyboard
+# toggles had. The legacy /aifilter and /reviewqueue commands still work.
+
+async def _render_settings(msg) -> None:
+    """Re-draw the settings panel in place, ignoring 'not modified' edits."""
+    try:
+        await msg.edit_text(_settings_text(), reply_markup=_settings_keyboard())
+    except Exception as exc:
+        if "not modified" not in str(exc).lower():
+            raise
+
+
+@router.message(Command("settings"))
+@router.message(F.text == "⚙️ Settings")
+async def cmd_settings(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    await state.clear()
+    await message.answer(_settings_text(), reply_markup=_settings_keyboard())
+
+
+@router.callback_query(F.data.startswith("set:"))
+async def cb_settings(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_USER_ID:
+        await callback.answer("Access denied.", show_alert=True)
+        return
+
+    action = callback.data.split(":", 1)[1]
+
+    if action == "ai":
+        new_state = db.toggle_ai_filter()
+        logger.info("[admin_bot] AI filter → %s (settings) by %s",
+                    "ON" if new_state else "OFF", callback.from_user.id)
+        await _render_settings(callback.message)
+        await callback.answer(f"AI Filter {'ON' if new_state else 'OFF'}")
+        return
+
+    if action == "rq":
+        new_state = db.toggle_review_queue()
+        logger.info("[admin_bot] Review queue → %s (settings) by %s",
+                    "ON" if new_state else "OFF", callback.from_user.id)
+        await _render_settings(callback.message)
+        await callback.answer(f"Review Queue {'ON' if new_state else 'OFF'}")
+        return
+
+    if action == "refresh":
+        await _render_settings(callback.message)
+        await callback.answer("Refreshed")
+        return
+
+    if action == "close":
+        await callback.message.edit_text("⚙️ Settings closed.", reply_markup=None)
+        await callback.answer()
+        return
+
+    if action == "vipclear":
+        db.set_priority_group_target(None)
+        logger.info("[admin_bot] VIP group cleared (settings) by %s", callback.from_user.id)
+        await _render_settings(callback.message)
+        await callback.answer("VIP group cleared")
+        return
+
+    if action == "vip":
+        await state.set_state(SetVipState.waiting_for_input)
+        await callback.message.answer(
+            "⭐ <b>Set VIP Group</b>\n\n"
+            "Send the numeric chat ID of the VIP group "
+            "(e.g. <code>-1001234567890</code>).\n\n"
+            "Priority guruhlardan kelgan e'lonlar shu guruhga yuboriladi.\n"
+            "⚠️ Botni o'sha guruhga <b>admin</b> qilib qo'shing.\n\n"
+            "/cancel to abort.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await callback.answer()
+        return
+
+    await callback.answer()
+
+
+@router.message(SetVipState.waiting_for_input)
+async def cmd_set_vip_receive(message: Message, state: FSMContext):
+    if not await _is_admin(message):
+        return
+    raw = (message.text or "").strip()
+    if raw.lower() == "/cancel":
+        await state.clear()
+        await message.answer("Cancelled.", reply_markup=_main_keyboard())
+        return
+    if not raw.lstrip("-").isdigit():
+        await message.answer(
+            "⚠️ Noto'g'ri format. Chat ID butun son bo'lishi kerak, masalan:\n"
+            "<code>-1001234567890</code>\n\n/cancel — bekor qilish."
+        )
+        return
+    chat_id = int(raw)
+    db.set_priority_group_target(chat_id)
+    await state.clear()
+    logger.info("[admin_bot] VIP group set to %s (settings) by %s",
+                chat_id, message.from_user.id)
+    await message.answer(
+        f"✅ <b>VIP Group set:</b> <code>{chat_id}</code>\n\n"
+        f"Eslatma: botni o'sha guruhga <b>admin</b> qilib qo'shing.\n"
+        f"Tekshirish uchun: /vipgrouptest",
+        reply_markup=_main_keyboard(),
+    )
+
+
+# ── Bot command menu (the native “/” menu in Telegram) ────────────
+
+_BOT_COMMANDS = [
+    BotCommand(command="start",            description="🏠 Asosiy menyu / main menu"),
+    BotCommand(command="listgroups",       description="📋 Source guruhlar ro'yxati"),
+    BotCommand(command="addgroup",         description="➕ Source guruh qo'shish"),
+    BotCommand(command="removegroup",      description="➖ Source guruh o'chirish"),
+    BotCommand(command="settarget",        description="🎯 Target guruhni o'rnatish"),
+    BotCommand(command="status",           description="📊 Holat va ulanish"),
+    BotCommand(command="stats",            description="📈 Statistika (7 kun)"),
+    BotCommand(command="checkgroups",      description="🔎 A'zolikni tekshirish"),
+    BotCommand(command="testkeyword",      description="🔍 Keyword filtrini sinash"),
+    BotCommand(command="testhalal",        description="🕌 Halal filtrini sinash"),
+    BotCommand(command="test",             description="🧪 Target'ga test xabar"),
+    BotCommand(command="settings",         description="⚙️ AI filter / Review / VIP"),
+    BotCommand(command="blockuser",        description="🚫 Bloklangan foydalanuvchilar"),
+    BotCommand(command="addblock",         description="🚫 Foydalanuvchini bloklash"),
+    BotCommand(command="unblockuser",      description="✅ Blokdan chiqarish"),
+    BotCommand(command="watchgroup",       description="⭐ Priority guruh qo'shish"),
+    BotCommand(command="unwatchgroup",     description="❌ Priority guruhni olib tashlash"),
+    BotCommand(command="setprioritygroup", description="⭐ VIP guruhni o'rnatish"),
+    BotCommand(command="vipgrouptest",     description="⭐ VIP guruhga test xabar"),
+    BotCommand(command="importgroups",     description="📥 Guruhlarni import qilish"),
+    BotCommand(command="clearstats",       description="🗑 Statistikani tozalash"),
+    BotCommand(command="cancel",           description="✖️ Joriy amalni bekor qilish"),
+]
+
+
+async def _on_error(event) -> None:
+    """
+    Global error handler — logs the exception and notifies the admin so a
+    failed handler never fails silently. Never raises itself.
+    """
+    exc = getattr(event, "exception", None)
+    logger.exception("[admin_bot] Unhandled error in handler: %s", exc)
+    try:
+        await notify_admin(
+            "⚠️ <b>Admin bot xatosi</b>\n\n"
+            f"<code>{_html.escape(str(exc))[:500]}</code>"
+        )
+    except Exception:
+        pass
+
+
 async def run_admin_bot() -> None:
     pathlib.Path("logs").mkdir(exist_ok=True)
     db.init_db()
 
-    bot = Bot(token=BOT_TOKEN)
+    # Global default parse_mode=HTML — no handler can forget it and leak raw
+    # tags. Dynamic content is still escaped at the call sites.
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     notifier_set_bot(bot)
 
     # Pass the bot instance to monitor.py so it can deliver review queue notifications
@@ -1938,6 +2239,13 @@ async def run_admin_bot() -> None:
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
+    dp.errors.register(_on_error)
+
+    # Publish the native “/” command menu (best-effort).
+    try:
+        await bot.set_my_commands(_BOT_COMMANDS)
+    except Exception as exc:
+        logger.warning("[admin_bot] set_my_commands failed: %s", exc)
 
     logger.info("[admin_bot] Starting admin bot …")
     await dp.start_polling(bot, skip_updates=True)

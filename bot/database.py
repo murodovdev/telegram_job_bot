@@ -1185,6 +1185,15 @@ def delete_review_item(review_id: int) -> None:
         )
 
 
+def count_review_queue() -> int:
+    """Return how many job posts are currently awaiting admin review."""
+    with _connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM halal_review_queue"
+        ).fetchone()
+    return row["n"] if row else 0
+
+
 def cleanup_review_queue(keep_hours: int = 48) -> int:
     """
     48 soatdan eski review queue yozuvlarini o'chiradi.
