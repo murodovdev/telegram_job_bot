@@ -60,9 +60,6 @@ _FILLED_KEYWORDS: list = [
     "odam olindi", "olindi", "olind", "band bo'ldi", "band boldi", "to'ldi", "toldi",
     "tugadi", "yopildi", "ishchi topildi", "aktual emas", "kerak emas",
     "olingan", "band", "topildi", "yopilyapti", "bitdi", "Ishga olindi",
-    # Ruscha
-    "взяли", "занято", "нашли", "закрыто", "не актуально", "нашли человека",
-    "место занято", "уже нашли", "закрыта", "набрали",
     # Koreys
     "채용완료", "마감", "충원완료", "구했어요", "채용됐어요", "마감됐어요",
     "뽑았어요", "완료", "마감입니다",
