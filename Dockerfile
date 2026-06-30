@@ -16,7 +16,8 @@ WORKDIR /app
 
 # Install dependencies first — cached unless requirements.txt changes
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy source (generate_session.py and local dev files excluded via .dockerignore)
 COPY . .
